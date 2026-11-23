@@ -1,11 +1,13 @@
 # ============================================================
-# GenummVPN Telegram Bot — единый файл для Bothost
-# Оплата: Telegram Stars (рабочая), СБП и Крипта (заглушка)
+# GenummVPN Telegram Bot + Web API для Mini App
 # ============================================================
 import asyncio
 import logging
 import os
+import hashlib
+import hmac
 from datetime import datetime, timedelta
+from urllib.parse import parse_qsl
 
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.filters import Command, CommandStart
@@ -17,15 +19,20 @@ from sqlalchemy import BigInteger, String, DateTime, Integer, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+# Веб-сервер
+from aiohttp import web
+
 # ============================================================
-# ⚙️ КОНФИГ (переменные окружения Bothost)
+# ⚙️ КОНФИГ
 # ============================================================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
-    raise ValueError("❌ Переменная окружения BOT_TOKEN не найдена. Добавь её в панели Bothost.")
+    raise ValueError("❌ Переменная окружения BOT_TOKEN не найдена.")
 
 ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip().isdigit()]
-WEBAPP_URL = os.getenv("WEBAPP_URL", "https://example.com")  # 🔧 замени на URL своего Mini App
+
+# Порт для веб-сервера (Bothost обычно пробрасывает 3000)
+PORT = int(os.getenv("PORT", 3000))
 
 PLANS = {
     "1m": {"name": "1 месяц",  "price_rub": 299,  "price_stars": 150,  "days": 30},
@@ -37,7 +44,7 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("genumm")
 
 # ============================================================
-# 🗄️ БАЗА ДАННЫХ (SQLite + SQLAlchemy async)
+# 🗄️ БАЗА ДАННЫХ
 # ============================================================
 class Base(DeclarativeBase):
     pass
@@ -88,24 +95,81 @@ async def extend_subscription(session, tg_id, days, plan_id, method, amount, sta
     user.sub_end = base + timedelta(days=days)
     if not user.vpn_key:
         user.vpn_key = f"vless://genumm-{tg_id}@vpn.genumm.com:443?type=tcp&security=reality#GenummVPN"
-    session.add(Payment(user_id=tg_id, plan_id=plan_id, method=method,
-                        amount=amount, status=status))
+    session.add(Payment(user_id=tg_id, plan_id=plan_id, method=method, amount=amount, status=status))
     await session.commit()
     return user
 
-async def get_stats(session):
-    users = (await session.execute(select(User))).scalars().all()
-    pays = (await session.execute(select(Payment).where(Payment.status.in_(["paid", "stub"])))).scalars().all()
-    rub = sum(p.amount for p in pays if p.method == "sbp")
-    stars = sum(p.amount for p in pays if p.method == "stars")
-    return len(users), rub, stars, len(pays)
+# ============================================================
+# 🔐 ПРОВЕРКА ПОДПИСИ TELEGRAM (initData)
+# ============================================================
+def verify_telegram_init_data(init_data: str, bot_token: str) -> dict | None:
+    try:
+        parsed_data = dict(parse_qsl(init_data))
+        if "hash" not in parsed_data:
+            return None
+        hash_ = parsed_data.pop("hash")
+        
+        data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(parsed_data.items()))
+        secret_key = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
+        calculated_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+        
+        if calculated_hash == hash_:
+            import json
+            return json.loads(parsed_data.get("user", "{}"))
+        return None
+    except Exception as e:
+        log.error(f"Ошибка проверки initData: {e}")
+        return None
+
+# ============================================================
+# 🌐 ВЕБ-СЕРВЕР (API для Mini App)
+# ============================================================
+async def handle_index(request):
+    """Отдаёт index.html при заходе на корень сайта"""
+    try:
+        with open("index.html", "r", encoding="utf-8") as f:
+            return web.Response(text=f.read(), content_type="text/html")
+    except FileNotFoundError:
+        return web.Response(text="index.html не найден. Загрузите его в корень проекта.", status=404)
+
+async def handle_profile(request):
+    """API: возвращает данные пользователя для Mini App"""
+    init_data = request.headers.get("X-Telegram-Init-Data")
+    if not init_data:
+        return web.json_response({"error": "No initData"}, status=401)
+        
+    user_data = verify_telegram_init_data(init_data, BOT_TOKEN)
+    if not user_data or "id" not in user_data:
+        return web.json_response({"error": "Invalid initData"}, status=403)
+        
+    tg_id = user_data["id"]
+    
+    async with SessionLocal() as session:
+        user = await get_user(session, tg_id)
+        if not user:
+            # Если юзера нет в базе, создаем его
+            user = await get_or_create_user(session, tg_id, user_data.get("username"))
+            
+        return web.json_response({
+            "id": user.id,
+            "username": user.username,
+            "sub_end": user.sub_end.isoformat() if user.sub_end else None,
+            "vpn_key": user.vpn_key
+        })
+
+def create_web_app():
+    app = web.Application()
+    app.router.add_get("/", handle_index)
+    app.router.add_get("/api/profile", handle_profile)
+    return app
 
 # ============================================================
 # ⌨️ КЛАВИАТУРЫ
 # ============================================================
 def main_menu():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🚀 Открыть GenummVPN", web_app=WebAppInfo(url=WEBAPP_URL))],
+        # 👇 Ссылка на Mini App будет вести на твой домен Bothost
+        [InlineKeyboardButton(text="🚀 Открыть GenummVPN", web_app=WebAppInfo(url=os.getenv("WEBAPP_URL", "https://example.com")))],
         [InlineKeyboardButton(text="💎 Купить подписку", callback_data="buy")],
         [InlineKeyboardButton(text="👤 Мой профиль", callback_data="profile")],
     ])
@@ -132,13 +196,12 @@ def admin_menu():
     ])
 
 # ============================================================
-# 🤖 РОУТЕР
+# 🤖 РОУТЕР БОТА (без изменений)
 # ============================================================
 router = Router()
 
 def is_admin(uid): return uid in ADMIN_IDS
 
-# ---------- /start ----------
 @router.message(CommandStart())
 async def cmd_start(message: Message):
     async with SessionLocal() as session:
@@ -149,7 +212,6 @@ async def cmd_start(message: Message):
         "Нажми на кнопку ниже, чтобы открыть приложение или купить подписку.",
         reply_markup=main_menu(), parse_mode="HTML")
 
-# ---------- Профиль ----------
 @router.callback_query(F.data == "profile")
 async def profile(cb: CallbackQuery):
     async with SessionLocal() as session:
@@ -166,7 +228,6 @@ async def profile(cb: CallbackQuery):
         reply_markup=main_menu(), parse_mode="HTML")
     await cb.answer()
 
-# ---------- Покупка ----------
 @router.callback_query(F.data == "buy")
 async def buy(cb: CallbackQuery):
     await cb.message.edit_text("<b>Выберите тариф:</b>", reply_markup=plans_kb(), parse_mode="HTML")
@@ -190,7 +251,6 @@ async def choose_plan(cb: CallbackQuery):
         reply_markup=pay_method_kb(plan_id), parse_mode="HTML")
     await cb.answer()
 
-# ---------- Stars (рабочая) ----------
 @router.callback_query(F.data.startswith("pay_stars_"))
 async def pay_stars(cb: CallbackQuery, bot: Bot):
     plan_id = cb.data.split("_")[2]
@@ -209,7 +269,7 @@ async def pay_stars(cb: CallbackQuery, bot: Bot):
 
 @router.pre_checkout_query()
 async def pre_checkout(q: PreCheckoutQuery):
-    await q.answer(ok=True)  # заглушка: всегда пропускаем
+    await q.answer(ok=True)
 
 @router.message(F.successful_payment)
 async def on_stars_paid(message: Message):
@@ -226,7 +286,6 @@ async def on_stars_paid(message: Message):
         f"Подписка активирована на {plan['days']} дней.",
         parse_mode="HTML", reply_markup=main_menu())
 
-# ---------- СБП (заглушка) ----------
 @router.callback_query(F.data.startswith("pay_sbp_"))
 async def pay_sbp(cb: CallbackQuery):
     plan_id = cb.data.split("_")[2]
@@ -234,16 +293,12 @@ async def pay_sbp(cb: CallbackQuery):
     if not plan: return
     stub_url = f"https://yoomoney.ru/checkout/stub?plan={plan_id}&amount={plan['price_rub']}"
     await cb.message.edit_text(
-        f"🏦 <b>Оплата через СБП</b>\n\n"
-        f"Тариф: {plan['name']}\nСумма: <b>{plan['price_rub']}₽</b>\n\n"
-        f"<i>(Заглушка. Позже здесь будет ссылка на ЮKassa)</i>\n"
-        f"<a href='{stub_url}'>Перейти к оплате (заглушка)</a>\n\n"
-        f"<b>Активировать в тестовом режиме:</b>\n"
-        f"<code>/pay_stub {plan_id} sbp</code>",
+        f"🏦 <b>Оплата через СБП</b>\n\nТариф: {plan['name']}\nСумма: <b>{plan['price_rub']}₽</b>\n\n"
+        f"<i>(Заглушка)</i>\n<a href='{stub_url}'>Перейти к оплате</a>\n\n"
+        f"<b>Активировать в тестовом режиме:</b>\n<code>/pay_stub {plan_id} sbp</code>",
         reply_markup=main_menu(), parse_mode="HTML", disable_web_page_preview=True)
     await cb.answer()
 
-# ---------- Крипта (заглушка) ----------
 @router.callback_query(F.data.startswith("pay_crypto_"))
 async def pay_crypto(cb: CallbackQuery):
     plan_id = cb.data.split("_")[2]
@@ -251,16 +306,12 @@ async def pay_crypto(cb: CallbackQuery):
     if not plan: return
     stub_url = f"https://t.me/CryptoBot?start=stub_{plan_id}"
     await cb.message.edit_text(
-        f"💎 <b>Оплата криптой (CryptoBot)</b>\n\n"
-        f"Тариф: {plan['name']}\nСумма: <b>{plan['price_rub']}₽</b>\n\n"
-        f"<i>(Заглушка. Позже здесь будет инвойс CryptoBot)</i>\n"
-        f"<a href='{stub_url}'>Открыть CryptoBot (заглушка)</a>\n\n"
-        f"<b>Активировать в тестовом режиме:</b>\n"
-        f"<code>/pay_stub {plan_id} crypto</code>",
+        f"💎 <b>Оплата криптой (CryptoBot)</b>\n\nТариф: {plan['name']}\nСумма: <b>{plan['price_rub']}₽</b>\n\n"
+        f"<i>(Заглушка)</i>\n<a href='{stub_url}'>Открыть CryptoBot</a>\n\n"
+        f"<b>Активировать в тестовом режиме:</b>\n<code>/pay_stub {plan_id} crypto</code>",
         reply_markup=main_menu(), parse_mode="HTML", disable_web_page_preview=True)
     await cb.answer()
 
-# ---------- Универсальная заглушка ----------
 @router.message(Command("pay_stub"))
 async def stub_payment(message: Message):
     args = message.text.split()
@@ -274,11 +325,9 @@ async def stub_payment(message: Message):
         await extend_subscription(session, message.from_user.id, plan["days"],
                                   plan_id, method, plan["price_rub"], status="stub")
     await message.answer(
-        f"✅ <b>Тестовая оплата принята!</b>\nМетод: {method}\n"
-        f"Подписка на {plan['days']} дней активирована.",
+        f"✅ <b>Тестовая оплата принята!</b>\nМетод: {method}\nПодписка на {plan['days']} дней активирована.",
         parse_mode="HTML", reply_markup=main_menu())
 
-# ---------- Админка ----------
 @router.message(Command("admin"))
 async def admin_cmd(message: Message):
     if not is_admin(message.from_user.id): return
@@ -289,10 +338,10 @@ async def admin_stats(cb: CallbackQuery):
     if not is_admin(cb.from_user.id):
         await cb.answer("Нет доступа"); return
     async with SessionLocal() as session:
-        users, rub, stars, pays = await get_stats(session)
+        users = (await session.execute(select(User))).scalars().all()
+        pays = (await session.execute(select(Payment).where(Payment.status.in_(["paid", "stub"])))).scalars().all()
     await cb.message.edit_text(
-        f"📊 <b>Статистика</b>\n\nПользователей: <b>{users}</b>\n"
-        f"Платежей: <b>{pays}</b>\nСумма ₽ (СБП): <b>{rub}</b>\nСумма ⭐: <b>{stars}</b>",
+        f"📊 <b>Статистика</b>\n\nПользователей: <b>{len(users)}</b>\nПлатежей: <b>{len(pays)}</b>",
         reply_markup=admin_menu(), parse_mode="HTML")
     await cb.answer()
 
@@ -301,22 +350,29 @@ async def admin_users(cb: CallbackQuery):
     if not is_admin(cb.from_user.id): return
     async with SessionLocal() as session:
         users = (await session.execute(select(User).limit(10))).scalars().all()
-    lines = [f"<code>{u.id}</code> @{u.username or '—'} до "
-             f"{(u.sub_end.strftime('%d.%m') if u.sub_end else '—')}" for u in users]
-    await cb.message.edit_text(
-        "👥 <b>Последние 10:</b>\n\n" + ("\n".join(lines) or "Пусто"),
-        reply_markup=admin_menu(), parse_mode="HTML")
+    lines = [f"<code>{u.id}</code> @{u.username or '—'} до {(u.sub_end.strftime('%d.%m') if u.sub_end else '—')}" for u in users]
+    await cb.message.edit_text("👥 <b>Последние 10:</b>\n\n" + ("\n".join(lines) or "Пусто"), reply_markup=admin_menu(), parse_mode="HTML")
     await cb.answer()
 
 # ============================================================
-# 🚀 ЗАПУСК
+# 🚀 ЗАПУСК (Бот + Веб-сервер)
 # ============================================================
 async def main():
     await init_db()
+    
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher()
     dp.include_router(router)
-    print("🤖 GenummVPN бот запущен (тестовый режим оплаты)")
+    
+    # Запускаем веб-сервер
+    app = create_web_app()
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", PORT)
+    await site.start()
+    log.info(f"🌐 Веб-сервер запущен на порту {PORT}")
+    
+    print("🤖 GenummVPN бот и веб-сервер запущены")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
