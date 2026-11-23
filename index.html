@@ -42,14 +42,10 @@
     <div class="logo">
       <svg viewBox="0 0 40 40" fill="none">
         <g stroke="#FF6B00" stroke-width="2" stroke-linecap="round">
-          <line x1="20" y1="4" x2="20" y2="12"/>
-          <line x1="20" y1="28" x2="20" y2="36"/>
-          <line x1="4" y1="20" x2="12" y2="20"/>
-          <line x1="28" y1="20" x2="36" y2="20"/>
-          <line x1="8" y1="8" x2="14" y2="14"/>
-          <line x1="26" y1="26" x2="32" y2="32"/>
-          <line x1="32" y1="8" x2="26" y2="14"/>
-          <line x1="14" y1="26" x2="8" y2="32"/>
+          <line x1="20" y1="4" x2="20" y2="12"/><line x1="20" y1="28" x2="20" y2="36"/>
+          <line x1="4" y1="20" x2="12" y2="20"/><line x1="28" y1="20" x2="36" y2="20"/>
+          <line x1="8" y1="8" x2="14" y2="14"/><line x1="26" y1="26" x2="32" y2="32"/>
+          <line x1="32" y1="8" x2="26" y2="14"/><line x1="14" y1="26" x2="8" y2="32"/>
         </g>
       </svg>
     </div>
@@ -62,9 +58,9 @@
 
   <div class="card">
     <h2>Мой профиль</h2>
-    <div class="row"><span>Статус</span><span id="status">—</span></div>
+    <div class="row"><span>Статус</span><span id="status">Загрузка...</span></div>
     <div class="row"><span>Подписка до</span><span id="subEnd">—</span></div>
-    <div class="key" id="vpnKey">Ключ не выдан</div>
+    <div class="key" id="vpnKey">Получение ключа...</div>
     <button class="btn btn-primary" onclick="copyKey()">📋 Скопировать ключ</button>
   </div>
 
@@ -104,17 +100,40 @@
     });
   });
 
-  function loadProfile() {
-    const user = tg?.initDataUnsafe?.user;
-    document.getElementById('status').textContent = 'Активна (тест)';
-    document.getElementById('subEnd').textContent = new Date(Date.now() + 30*864e5).toLocaleDateString('ru-RU');
-    document.getElementById('vpnKey').textContent =
-      `vless://genumm-${user?.id || 'demo'}@vpn.genumm.com:443?type=tcp&security=reality#GenummVPN`;
+  // Загрузка реального профиля из API
+  async function loadProfile() {
+    const initData = tg?.initData;
+    if (!initData) {
+      document.getElementById('status').textContent = 'Откройте через Telegram';
+      document.getElementById('vpnKey').textContent = 'Доступно только в Mini App';
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/profile', {
+        headers: { 'X-Telegram-Init-Data': initData }
+      });
+      
+      if (!response.ok) throw new Error('API error');
+      
+      const data = await response.json();
+      
+      document.getElementById('status').textContent = data.sub_end ? 'Активна' : 'Не активна';
+      document.getElementById('subEnd').textContent = data.sub_end ? new Date(data.sub_end).toLocaleDateString('ru-RU') : '—';
+      document.getElementById('vpnKey').textContent = data.vpn_key || 'Ключ не выдан';
+      
+    } catch (e) {
+      console.error(e);
+      document.getElementById('status').textContent = 'Ошибка загрузки';
+    }
   }
+  
   loadProfile();
 
   function copyKey() {
     const txt = document.getElementById('vpnKey').textContent;
+    if (txt === 'Ключ не выдан' || txt === 'Получение ключа...') return;
+    
     navigator.clipboard.writeText(txt).then(() => {
       if (tg) tg.showAlert('Ключ скопирован ✅');
     });
@@ -124,8 +143,6 @@
     if (tg) {
       tg.showAlert(`Выбран тариф: ${selectedPlan}\n\nОплата доступна в боте: нажми «Купить подписку».`);
       tg.close();
-    } else {
-      alert(`Выбран тариф: ${selectedPlan}`);
     }
   }
 </script>
