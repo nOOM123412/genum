@@ -22,7 +22,11 @@ from aiohttp import web
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip().isdigit()]
 PORT = int(os.getenv("PORT", 3000))
+
+# Автоисправление URL
 WEBAPP_URL = os.getenv("WEBAPP_URL", "https://example.com")
+if not WEBAPP_URL.startswith("http"):
+    WEBAPP_URL = f"https://{WEBAPP_URL}"
 
 PLANS = {
     "1m": {"name": "1 месяц",  "price_rub": 299,  "price_stars": 150,  "days": 30},
@@ -85,7 +89,7 @@ async def extend_subscription(session, tg_id, days, plan_id, method, amount, sta
     await session.commit()
     return user
 
-# 🔐 ВЕРИФИКАЦИЯ TELEGRAM INITDATA
+# 🔐 ВЕРИФИКАЦИЯ
 def verify_telegram_init_data(init_data: str, bot_token: str) -> dict | None:
     try:
         parsed_data = dict(parse_qsl(init_data))
@@ -97,9 +101,7 @@ def verify_telegram_init_data(init_data: str, bot_token: str) -> dict | None:
         if calculated_hash == hash_:
             return json.loads(parsed_data.get("user", "{}"))
         return None
-    except Exception as e:
-        log.error(f"Ошибка initData: {e}")
-        return None
+    except: return None
 
 # 🌐 ВЕБ-СЕРВЕР
 async def handle_index(request):
@@ -131,22 +133,24 @@ def create_web_app():
     app.router.add_get("/api/profile", handle_profile)
     return app
 
-# ⌨️ КЛАВИАТУРЫ БОТА
+# ⌨️ КЛАВИАТУРЫ
 def main_menu():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🚀 Открыть GenummVPN", web_app=WebAppInfo(url=WEBAPP_URL))],
     ])
 
-def admin_menu():
+def pay_methods_kb(plan_id):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")],
+        [InlineKeyboardButton(text="⭐ Telegram Stars", callback_data=f"pay_stars_{plan_id}")],
+        [InlineKeyboardButton(text="🏦 СБП (карта)", callback_data=f"pay_sbp_{plan_id}")],
+        [InlineKeyboardButton(text="💎 Криптовалюта", callback_data=f"pay_crypto_{plan_id}")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_app")]
     ])
 
 # 🤖 РОУТЕР
 router = Router()
 def is_admin(uid): return uid in ADMIN_IDS
 
-# Реакция на /start
 @router.message(CommandStart())
 async def cmd_start(message: Message):
     async with SessionLocal() as session:
@@ -154,51 +158,106 @@ async def cmd_start(message: Message):
     await message.answer(
         "<b>Добро пожаловать в GenummVPN</b> 🚀\n"
         "<i>Speed up your freedom</i>\n\n"
-        "Нажми на кнопку ниже, чтобы открыть личный кабинет и управлять подпиской.",
+        "Нажми на кнопку ниже, чтобы открыть личный кабинет.",
         reply_markup=main_menu(), parse_mode="HTML")
 
-# Реакция на кнопку "Меню" (если настроена в BotFather)
-@router.message(F.text == "Меню")
-@router.message(F.text == "Start")
-@router.message(F.text == "Главное меню")
-async def menu_button(message: Message):
-    await cmd_start(message)
-
-# Обработка данных из Mini App
+# --- Обработка данных из Mini App ---
 @router.message(F.web_app_data)
 async def web_app_data(message: Message, bot: Bot):
     try:
         data = json.loads(message.web_app_data.data)
         action = data.get("action")
-        plan_id = data.get("plan")
-        plan = PLANS.get(plan_id)
-        if not plan: return
         
-        if action == "buy_stars":
-            await bot.send_invoice(
-                chat_id=message.from_user.id,
-                title=f"GenummVPN — {plan['name']}",
-                description=f"Подписка на {plan['days']} дней",
-                payload=f"stars_{plan_id}",
-                provider_token="",
-                currency="XTR",
-                prices=[LabeledPrice(label=plan['name'], amount=plan['price_stars'])],
-            )
-        elif action == "buy_sbp":
-            stub_url = f"https://yoomoney.ru/checkout/stub?plan={plan_id}&amount={plan['price_rub']}"
+        # 1. Оплата
+        if action == "checkout":
+            plan_id = data.get("plan")
+            plan = PLANS.get(plan_id)
+            if not plan: return
             await message.answer(
-                f"🏦 <b>Оплата через СБП</b>\n\nСумма: <b>{plan['price_rub']}₽</b>\n"
-                f"<i>(Заглушка)</i>\n<a href='{stub_url}'>Перейти к оплате</a>\n\n"
-                f"<b>Активировать в тестовом режиме:</b>\n<code>/pay_stub {plan_id} sbp</code>",
-                parse_mode="HTML", disable_web_page_preview=True
+                f"<b>Вы выбрали тариф:</b> {plan['name']} ({plan['price_rub']}₽ / {plan['price_stars']}⭐)\n\n"
+                f"Выберите удобный способ оплаты:",
+                reply_markup=pay_methods_kb(plan_id),
+                parse_mode="HTML"
             )
+            
+        # 2. Поддержка (пересылка админу)
+        elif action == "support":
+            text = data.get("text")
+            username = message.from_user.username or "Скрыт"
+            
+            # Отправляем всем админам
+            for admin_id in ADMIN_IDS:
+                try:
+                    await bot.send_message(
+                        admin_id,
+                        f"📩 <b>Новое сообщение в поддержку!</b>\n\n"
+                        f"👤 От: @{username} (ID: <code>{message.from_user.id}</code>)\n\n"
+                        f"💬 <b>Текст:</b>\n{text}\n\n"
+                        f"<i>Чтобы ответить, просто нажмите 'Ответить' на это сообщение.</i>",
+                        parse_mode="HTML"
+                    )
+                except Exception as e:
+                    log.error(f"Не удалось отправить админу {admin_id}: {e}")
+            
+            await message.answer("✅ Ваше сообщение отправлено в поддержку. Мы ответим вам в ближайшее время.")
+            
     except Exception as e:
         log.error(f"Ошибка web_app_data: {e}")
 
-# Telegram Stars
+# --- Оплата (Callback-и) ---
+@router.callback_query(F.data.startswith("pay_stars_"))
+async def pay_stars(cb: CallbackQuery, bot: Bot):
+    plan_id = cb.data.split("_")[2]
+    plan = PLANS.get(plan_id)
+    if not plan: return
+    await bot.send_invoice(
+        chat_id=cb.from_user.id,
+        title=f"GenummVPN — {plan['name']}",
+        description=f"Подписка на {plan['days']} дней",
+        payload=f"stars_{plan_id}",
+        provider_token="",
+        currency="XTR",
+        prices=[LabeledPrice(label=plan['name'], amount=plan['price_stars'])],
+    )
+    await cb.answer()
+
+@router.callback_query(F.data.startswith("pay_sbp_"))
+async def pay_sbp(cb: CallbackQuery):
+    plan_id = cb.data.split("_")[2]
+    plan = PLANS.get(plan_id)
+    if not plan: return
+    stub_url = f"https://yoomoney.ru/checkout/stub?plan={plan_id}&amount={plan['price_rub']}"
+    await cb.message.edit_text(
+        f"🏦 <b>Оплата СБП</b>\nСумма: {plan['price_rub']}₽\n"
+        f"<a href='{stub_url}'>Перейти к оплате</a>\n\n"
+        f"<i>(Заглушка)</i>",
+        parse_mode="HTML", disable_web_page_preview=True
+    )
+    await cb.answer()
+
+@router.callback_query(F.data.startswith("pay_crypto_"))
+async def pay_crypto(cb: CallbackQuery):
+    plan_id = cb.data.split("_")[2]
+    plan = PLANS.get(plan_id)
+    if not plan: return
+    stub_url = f"https://t.me/CryptoBot?start=stub_{plan_id}"
+    await cb.message.edit_text(
+        f"💎 <b>Оплата Криптой</b>\n"
+        f"<a href='{stub_url}'>Открыть CryptoBot</a>\n\n"
+        f"<i>(Заглушка)</i>",
+        parse_mode="HTML", disable_web_page_preview=True
+    )
+    await cb.answer()
+
+@router.callback_query(F.data == "back_to_app")
+async def back_to_app(cb: CallbackQuery):
+    await cb.message.delete()
+    await cmd_start(cb.message)
+    await cb.answer()
+
+# --- Платежи ---
 @router.pre_checkout_query()
-async def pre_checkout(q: PreCheckoutQuery):
-    await q.answer(ok=True)
+async def pre_checkout(q: PreCheckoutQuery): await q.answer(ok=True)
 
 @router.message(F.successful_payment)
 async def on_stars_paid(message: Message):
@@ -214,36 +273,36 @@ async def on_stars_paid(message: Message):
         f"Подписка активирована на {plan['days']} дней. Откройте Mini App.",
         parse_mode="HTML", reply_markup=main_menu())
 
-# Заглушка оплаты
-@router.message(Command("pay_stub"))
-async def stub_payment(message: Message):
-    args = message.text.split()
-    if len(args) < 3: return
-    plan_id, method = args[1], args[2]
-    plan = PLANS.get(plan_id)
-    if not plan: return
-    async with SessionLocal() as session:
-        await extend_subscription(session, message.from_user.id, plan["days"], plan_id, method, plan["price_rub"], status="stub")
-    await message.answer(
-        f"✅ <b>Тестовая оплата!</b> Подписка на {plan['days']} дней активирована.",
-        parse_mode="HTML", reply_markup=main_menu())
+# --- Пересылка ответа от админа пользователю ---
+@router.message(F.reply_to_message)
+async def admin_reply(message: Message):
+    if message.from_user.id not in ADMIN_IDS: return
+    
+    # Проверяем, является ли сообщение ответом на сообщение от бота
+    if message.reply_to_message.from_user.id != (await message.bot.get_me()).id: return
+    
+    # Пытаемся вытащить ID пользователя из текста сообщения, на которое ответили
+    text = message.reply_to_message.text
+    try:
+        # Ищем паттерн ID: <code>12345678</code>
+        import re
+        match = re.search(r'ID: <code>(\d+)</code>', text)
+        if match:
+            user_id = int(match.group(1))
+            await message.bot.send_message(
+                user_id,
+                f"💬 <b>Ответ поддержки:</b>\n\n{message.text}",
+                parse_mode="HTML"
+            )
+            await message.answer("✅ Ответ отправлен пользователю.")
+    except Exception as e:
+        log.error(f"Ошибка при ответе: {e}")
 
-# Админка
+# --- Админка ---
 @router.message(Command("admin"))
 async def admin_cmd(message: Message):
     if not is_admin(message.from_user.id): return
-    await message.answer("👑 <b>Админ-панель</b>", reply_markup=admin_menu(), parse_mode="HTML")
-
-@router.callback_query(F.data == "admin_stats")
-async def admin_stats(cb: CallbackQuery):
-    if not is_admin(cb.from_user.id): return
-    async with SessionLocal() as session:
-        users = (await session.execute(select(User))).scalars().all()
-        pays = (await session.execute(select(Payment).where(Payment.status.in_(["paid", "stub"])))).scalars().all()
-    await cb.message.edit_text(
-        f"📊 <b>Статистика</b>\n\nПользователей: <b>{len(users)}</b>\nПлатежей: <b>{len(pays)}</b>",
-        reply_markup=admin_menu(), parse_mode="HTML")
-    await cb.answer()
+    await message.answer("👑 Админ-панель активна.\nДля ответа пользователю просто нажмите 'Ответить' на его сообщение в поддержку.")
 
 # 🚀 ЗАПУСК
 async def main():
@@ -257,7 +316,6 @@ async def main():
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", PORT)
     await site.start()
-    log.info(f"🌐 Веб-сервер запущен на порту {PORT}")
     
     print("🤖 GenummVPN запущен")
     await dp.start_polling(bot)
