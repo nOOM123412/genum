@@ -6,84 +6,234 @@
 <title>GenummVPN</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
-  :root{
-    --bg:#000; --card:#0d0d0d; --line:#1f1f1f;
-    --orange:#FF6B00; --white:#fff; --gray:#9a9a9a;
+  :root {
+    --bg: #000000;
+    --glass-bg: rgba(20, 20, 20, 0.6);
+    --glass-border: rgba(255, 255, 255, 0.08);
+    --orange: #FF6B00;
+    --text-main: #ffffff;
+    --text-muted: #8e8e93;
+    --ios-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   }
-  *{box-sizing:border-box; margin:0; padding:0; font-family:-apple-system,'Segoe UI',Roboto,sans-serif;}
-  body{background:var(--bg); color:var(--white); min-height:100vh; padding:20px 16px 100px;}
-  .brand{display:flex; align-items:center; gap:10px; margin-bottom:8px;}
-  .logo{width:34px; height:34px; display:grid; place-items:center;}
-  .logo svg{width:34px; height:34px;}
-  .brand h1{font-size:20px; letter-spacing:6px; font-weight:600;}
-  .brand .sub{font-size:9px; letter-spacing:3px; color:var(--gray); margin-top:2px;}
-  .slogan{color:var(--orange); font-size:11px; letter-spacing:4px; margin:6px 0 26px;}
-  .card{background:var(--card); border:1px solid var(--line); border-radius:18px; padding:18px; margin-bottom:14px;}
-  .card h2{font-size:13px; letter-spacing:3px; color:var(--orange); margin-bottom:14px; text-transform:uppercase;}
-  .row{display:flex; justify-content:space-between; font-size:14px; margin-bottom:10px;}
-  .row span:first-child{color:var(--gray);}
-  .key{background:#000; border:1px solid var(--line); border-radius:12px; padding:12px; font-size:11px; color:#cfcfcf; word-break:break-all; margin-top:6px; font-family:monospace;}
-  .btn{display:block; width:100%; padding:15px; border:none; border-radius:14px; font-size:15px; font-weight:600; letter-spacing:1px; cursor:pointer; margin-top:10px; transition:.2s;}
-  .btn-primary{background:var(--orange); color:#000;}
-  .btn-primary:active{transform:scale(.98); opacity:.9;}
-  .plans{display:flex; flex-direction:column; gap:10px;}
-  .plan{display:flex; justify-content:space-between; align-items:center; border:1px solid var(--line); border-radius:14px; padding:16px; cursor:pointer; transition:.2s;}
-  .plan.active{border-color:var(--orange); background:#110900;}
-  .plan .name{font-size:15px; font-weight:600;}
-  .plan .meta{font-size:11px; color:var(--gray); margin-top:4px;}
-  .plan .price{color:var(--orange); font-weight:700; font-size:16px; text-align:right;}
-  .plan .stars{font-size:11px; color:var(--gray); margin-top:2px; text-align:right;}
-  .footer{position:fixed; left:16px; right:16px; bottom:16px;}
+
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: var(--ios-font); -webkit-tap-highlight-color: transparent; }
+  
+  body {
+    background-color: var(--bg);
+    color: var(--text-main);
+    min-height: 100vh;
+    padding: 20px 16px 100px;
+    overflow-x: hidden;
+  }
+
+  /* Логотип и шапка */
+  .header { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; padding: 0 4px; }
+  .logo-icon { width: 36px; height: 36px; display: grid; place-items: center; }
+  .logo-icon svg { width: 36px; height: 36px; filter: drop-shadow(0 0 8px rgba(255,107,0,0.4)); }
+  .header h1 { font-size: 22px; letter-spacing: 5px; font-weight: 700; }
+  .header .sub { font-size: 9px; letter-spacing: 3px; color: var(--text-muted); margin-top: 2px; text-transform: uppercase; }
+
+  /* Стеклянные карточки */
+  .glass-card {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 24px;
+    padding: 20px;
+    margin-bottom: 16px;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    transition: transform 0.2s ease;
+  }
+
+  .card-title { font-size: 12px; letter-spacing: 2px; color: var(--orange); margin-bottom: 16px; text-transform: uppercase; font-weight: 600; display: flex; align-items: center; gap: 8px;}
+  .card-title svg { width: 16px; height: 16px; fill: var(--orange); }
+  
+  .row { display: flex; justify-content: space-between; align-items: center; font-size: 15px; margin-bottom: 14px; }
+  .row:last-child { margin-bottom: 0; }
+  .row .label { color: var(--text-muted); }
+  .row .value { font-weight: 600; }
+  .status-active { color: #34c759; }
+  .status-inactive { color: #ff3b30; }
+
+  /* Блок с ключом */
+  .key-box {
+    background: rgba(0,0,0,0.5);
+    border: 1px solid var(--glass-border);
+    border-radius: 16px;
+    padding: 14px;
+    font-size: 12px;
+    color: #d1d1d6;
+    word-break: break-all;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    margin-top: 8px;
+    line-height: 1.4;
+  }
+
+  /* Кнопки */
+  .btn {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    width: 100%; padding: 16px; border: none; border-radius: 18px;
+    font-size: 16px; font-weight: 600; cursor: pointer; transition: all 0.2s ease;
+  }
+  .btn svg { width: 20px; height: 20px; fill: currentColor; }
+  .btn:active { transform: scale(0.97); opacity: 0.8; }
+  
+  .btn-primary { background: var(--orange); color: #000; box-shadow: 0 4px 15px rgba(255, 107, 0, 0.3); }
+  .btn-glass { background: rgba(255, 255, 255, 0.1); color: var(--text-main); border: 1px solid var(--glass-border); }
+  .btn-glass:active { background: rgba(255, 255, 255, 0.15); }
+
+  /* Тарифы (Сетка) */
+  .plans-grid { display: flex; flex-direction: column; gap: 12px; }
+  .plan-card {
+    display: flex; justify-content: space-between; align-items: center;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--glass-border);
+    border-radius: 20px; padding: 18px;
+    cursor: pointer; transition: all 0.2s ease;
+  }
+  .plan-card.active { border-color: var(--orange); background: rgba(255, 107, 0, 0.08); }
+  .plan-info .name { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
+  .plan-info .meta { font-size: 12px; color: var(--text-muted); }
+  .plan-price { text-align: right; }
+  .plan-price .rub { color: var(--orange); font-weight: 700; font-size: 18px; }
+  .plan-price .stars { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+
+  /* Экраны (вкладки) */
+  .screen { display: none; animation: fadeIn 0.3s ease; }
+  .screen.active { display: block; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+  /* iOS Hotbar (Стеклянный) */
+  .hotbar {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    width: calc(100% - 32px); max-width: 400px;
+    background: rgba(30, 30, 30, 0.7);
+    backdrop-filter: blur(25px); -webkit-backdrop-filter: blur(25px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 30px; display: flex; justify-content: space-around; padding: 8px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5); z-index: 100;
+  }
+  .tab-btn {
+    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 8px 0; background: transparent; border: none; color: var(--text-muted);
+    font-size: 10px; font-weight: 500; cursor: pointer; transition: color 0.2s;
+  }
+  .tab-btn svg { width: 24px; height: 24px; margin-bottom: 4px; fill: currentColor; }
+  .tab-btn.active { color: var(--orange); }
 </style>
 </head>
 <body>
 
-  <div class="brand">
-    <div class="logo">
+  <!-- Шапка -->
+  <div class="header">
+    <div class="logo-icon">
       <svg viewBox="0 0 40 40" fill="none">
-        <g stroke="#FF6B00" stroke-width="2" stroke-linecap="round">
-          <line x1="20" y1="4" x2="20" y2="12"/><line x1="20" y1="28" x2="20" y2="36"/>
-          <line x1="4" y1="20" x2="12" y2="20"/><line x1="28" y1="20" x2="36" y2="20"/>
-          <line x1="8" y1="8" x2="14" y2="14"/><line x1="26" y1="26" x2="32" y2="32"/>
-          <line x1="32" y1="8" x2="26" y2="14"/><line x1="14" y1="26" x2="8" y2="32"/>
+        <g stroke="var(--orange)" stroke-width="2.5" stroke-linecap="round">
+          <line x1="20" y1="2" x2="20" y2="12"/><line x1="20" y1="28" x2="20" y2="38"/>
+          <line x1="2" y1="20" x2="12" y2="20"/><line x1="28" y1="20" x2="38" y2="20"/>
+          <line x1="6" y1="6" x2="13" y2="13"/><line x1="27" y1="27" x2="34" y2="34"/>
+          <line x1="34" y1="6" x2="27" y2="13"/><line x1="13" y1="27" x2="6" y2="34"/>
         </g>
       </svg>
     </div>
     <div>
       <h1>GENUMM</h1>
-      <div class="sub">SPEED UP YOUR FREEDOM</div>
-    </div>
-  </div>
-  <div class="slogan">VPN · БЕЗ ГРАНИЦ</div>
-
-  <div class="card">
-    <h2>Мой профиль</h2>
-    <div class="row"><span>Статус</span><span id="status">Загрузка...</span></div>
-    <div class="row"><span>Подписка до</span><span id="subEnd">—</span></div>
-    <div class="key" id="vpnKey">Получение ключа...</div>
-    <button class="btn btn-primary" onclick="copyKey()">📋 Скопировать ключ</button>
-  </div>
-
-  <div class="card">
-    <h2>Тарифы</h2>
-    <div class="plans" id="plans">
-      <div class="plan" data-plan="1m">
-        <div><div class="name">1 месяц</div><div class="meta">30 дней</div></div>
-        <div><div class="price">299 ₽</div><div class="stars">150 ⭐</div></div>
-      </div>
-      <div class="plan active" data-plan="3m">
-        <div><div class="name">3 месяца</div><div class="meta">90 дней · выгода 15%</div></div>
-        <div><div class="price">799 ₽</div><div class="stars">400 ⭐</div></div>
-      </div>
-      <div class="plan" data-plan="1y">
-        <div><div class="name">1 год</div><div class="meta">365 дней · выгода 30%</div></div>
-        <div><div class="price">2490 ₽</div><div class="stars">1200 ⭐</div></div>
-      </div>
+      <div class="sub">Speed up your freedom</div>
     </div>
   </div>
 
-  <div class="footer">
-    <button class="btn btn-primary" onclick="buyPlan()">Оформить подписку</button>
+  <!-- ================= ЭКРАН 1: ГЛАВНАЯ ================= -->
+  <div id="screen-home" class="screen active">
+    
+    <div class="glass-card">
+      <div class="card-title">
+        <svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+        Мой профиль
+      </div>
+      <div class="row">
+        <span class="label">Статус</span>
+        <span id="status" class="value status-inactive">Загрузка...</span>
+      </div>
+      <div class="row">
+        <span class="label">Подписка до</span>
+        <span id="subEnd" class="value">—</span>
+      </div>
+    </div>
+
+    <div class="glass-card">
+      <div class="card-title">
+        <svg viewBox="0 0 24 24"><path d="M12.65 10C11.83 7.67 9.61 6 7 6c-3.31 0-6 2.69-6 6s2.69 6 6 6c2.61 0 4.83-1.67 5.65-4H17v4h4v-4h2v-4H12.65zM7 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/></svg>
+        Ваш ключ доступа
+      </div>
+      <div class="key-box" id="vpnKey">Получение ключа...</div>
+      <button class="btn btn-glass" style="margin-top: 12px;" onclick="copyKey()">
+        <svg viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>
+        Скопировать
+      </button>
+    </div>
+
+    <div class="glass-card">
+      <div class="card-title">
+        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25z"/></svg>
+        Помощь
+      </div>
+      <div class="row" style="margin-bottom: 16px;">
+        <span class="label" style="font-size: 13px;">Возникли вопросы? Напишите нам.</span>
+      </div>
+      <button class="btn btn-glass" onclick="openSupport()">
+        <svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"/></svg>
+        Написать в поддержку
+      </button>
+    </div>
+
+  </div>
+
+  <!-- ================= ЭКРАН 2: МАГАЗИН ================= -->
+  <div id="screen-shop" class="screen">
+    <div class="glass-card" style="padding: 16px;">
+      <div class="card-title" style="margin-bottom: 8px;">
+        <svg viewBox="0 0 24 24"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg>
+        Выберите тариф
+      </div>
+      <div class="plans-grid" id="plans">
+        <div class="plan-card" data-plan="1m" data-stars="150">
+          <div class="plan-info"><div class="name">1 месяц</div><div class="meta">30 дней</div></div>
+          <div class="plan-price"><div class="rub">299 ₽</div><div class="stars">150 ⭐</div></div>
+        </div>
+        <div class="plan-card active" data-plan="3m" data-stars="400">
+          <div class="plan-info"><div class="name">3 месяца</div><div class="meta">90 дней · выгода 15%</div></div>
+          <div class="plan-price"><div class="rub">799 ₽</div><div class="stars">400 ⭐</div></div>
+        </div>
+        <div class="plan-card" data-plan="1y" data-stars="1200">
+          <div class="plan-info"><div class="name">1 год</div><div class="meta">365 дней · выгода 30%</div></div>
+          <div class="plan-price"><div class="rub">2490 ₽</div><div class="stars">1200 ⭐</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div style="padding: 0 8px;">
+      <button class="btn btn-primary" onclick="buyStars()">
+        <svg viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
+        Оплатить Stars
+      </button>
+      <button class="btn btn-glass" style="margin-top: 12px;" onclick="buySBP()">
+        <svg viewBox="0 0 24 24"><path d="M20 4H4c-1.11 0-1.99.89-1.99 2L2 18c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V6c0-1.11-.89-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z"/></svg>
+        Оплатить СБП (карта)
+      </button>
+    </div>
+  </div>
+
+  <!-- ================= HOTBAR (НИЖНЕЕ МЕНЮ) ================= -->
+  <div class="hotbar">
+    <button class="tab-btn active" onclick="switchTab('home')" id="tab-home">
+      <svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
+      Главная
+    </button>
+    <button class="tab-btn" onclick="switchTab('shop')" id="tab-shop">
+      <svg viewBox="0 0 24 24"><path d="M7 18c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2zM1 2v2h2l3.6 7.59-1.35 2.45c-.16.28-.25.61-.25.96 0 1.1.9 2 2 2h12v-2H7.42c-.14 0-.25-.11-.25-.25l.03-.12.9-1.63h7.45c.75 0 1.41-.41 1.75-1.03l3.58-6.49c.08-.14.12-.31.12-.48 0-.55-.45-1-1-1H5.21l-.94-2H1zm16 16c-1.1 0-1.99.9-1.99 2s.89 2 1.99 2 2-.9 2-2-.9-2-2-2z"/></svg>
+      Магазин
+    </button>
   </div>
 
 <script>
@@ -92,58 +242,74 @@
 
   let selectedPlan = '3m';
 
-  document.querySelectorAll('.plan').forEach(el => {
+  function switchTab(tabId) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById(`screen-${tabId}`).classList.add('active');
+    document.getElementById(`tab-${tabId}`).classList.add('active');
+    if (tg) tg.HapticFeedback.impactOccurred('light');
+  }
+
+  document.querySelectorAll('.plan-card').forEach(el => {
     el.addEventListener('click', () => {
-      document.querySelectorAll('.plan').forEach(p => p.classList.remove('active'));
+      document.querySelectorAll('.plan-card').forEach(p => p.classList.remove('active'));
       el.classList.add('active');
       selectedPlan = el.dataset.plan;
+      if (tg) tg.HapticFeedback.selectionChanged();
     });
   });
 
-  // Загрузка реального профиля из API
   async function loadProfile() {
     const initData = tg?.initData;
     if (!initData) {
-      document.getElementById('status').textContent = 'Откройте через Telegram';
+      document.getElementById('status').textContent = 'Откройте в TG';
+      document.getElementById('status').className = 'value status-inactive';
       document.getElementById('vpnKey').textContent = 'Доступно только в Mini App';
       return;
     }
 
     try {
-      const response = await fetch('/api/profile', {
-        headers: { 'X-Telegram-Init-Data': initData }
-      });
+      const res = await fetch('/api/profile', { headers: { 'X-Telegram-Init-Data': initData } });
+      if (!res.ok) throw new Error();
+      const data = await res.json();
       
-      if (!response.ok) throw new Error('API error');
-      
-      const data = await response.json();
-      
-      document.getElementById('status').textContent = data.sub_end ? 'Активна' : 'Не активна';
-      document.getElementById('subEnd').textContent = data.sub_end ? new Date(data.sub_end).toLocaleDateString('ru-RU') : '—';
+      const isActive = !!data.sub_end;
+      document.getElementById('status').textContent = isActive ? 'Активна' : 'Не активна';
+      document.getElementById('status').className = `value ${isActive ? 'status-active' : 'status-inactive'}`;
+      document.getElementById('subEnd').textContent = isActive 
+        ? new Date(data.sub_end).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }) 
+        : '—';
       document.getElementById('vpnKey').textContent = data.vpn_key || 'Ключ не выдан';
-      
     } catch (e) {
-      console.error(e);
-      document.getElementById('status').textContent = 'Ошибка загрузки';
+      document.getElementById('status').textContent = 'Ошибка сети';
     }
   }
-  
   loadProfile();
 
   function copyKey() {
     const txt = document.getElementById('vpnKey').textContent;
-    if (txt === 'Ключ не выдан' || txt === 'Получение ключа...') return;
-    
+    if (txt.includes('Ключ не выдан') || txt.includes('Получение') || txt.includes('Доступно только')) return;
     navigator.clipboard.writeText(txt).then(() => {
-      if (tg) tg.showAlert('Ключ скопирован ✅');
+      if (tg) { tg.HapticFeedback.notificationOccurred('success'); tg.showAlert('Ключ скопирован'); }
+      else alert('Скопировано');
     });
   }
 
-  function buyPlan() {
-    if (tg) {
-      tg.showAlert(`Выбран тариф: ${selectedPlan}\n\nОплата доступна в боте: нажми «Купить подписку».`);
-      tg.close();
-    }
+  function openSupport() {
+    const url = 'https://t.me/your_support_username'; // ЗАМЕНИ
+    if (tg) tg.openTelegramLink(url); else window.open(url, '_blank');
+  }
+
+  function buyStars() {
+    if (!tg) return;
+    tg.sendData(JSON.stringify({ action: 'buy_stars', plan: selectedPlan }));
+    tg.close();
+  }
+
+  function buySBP() {
+    if (!tg) return;
+    tg.sendData(JSON.stringify({ action: 'buy_sbp', plan: selectedPlan }));
+    tg.close();
   }
 </script>
 </body>
