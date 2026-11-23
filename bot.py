@@ -238,4 +238,29 @@ async def admin_cmd(message: Message):
 async def admin_stats(cb: CallbackQuery):
     if not is_admin(cb.from_user.id): return
     async with SessionLocal() as session:
-        users = (await session
+        users = (await session.execute(select(User))).scalars().all()
+        pays = (await session.execute(select(Payment).where(Payment.status.in_(["paid", "stub"])))).scalars().all()
+    await cb.message.edit_text(
+        f"📊 <b>Статистика</b>\n\nПользователей: <b>{len(users)}</b>\nПлатежей: <b>{len(pays)}</b>",
+        reply_markup=admin_menu(), parse_mode="HTML")
+    await cb.answer()
+
+# 🚀 ЗАПУСК
+async def main():
+    await init_db()
+    bot = Bot(token=BOT_TOKEN)
+    dp = Dispatcher()
+    dp.include_router(router)
+    
+    app = create_web_app()
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", PORT)
+    await site.start()
+    log.info(f"🌐 Веб-сервер запущен на порту {PORT}")
+    
+    print("🤖 GenummVPN запущен")
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
