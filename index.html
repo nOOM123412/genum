@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>GenummVPN</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root{
+    --bg:#000; --card:#0d0d0d; --line:#1f1f1f;
+    --orange:#FF6B00; --white:#fff; --gray:#9a9a9a;
+  }
+  *{box-sizing:border-box; margin:0; padding:0; font-family:-apple-system,'Segoe UI',Roboto,sans-serif;}
+  body{background:var(--bg); color:var(--white); min-height:100vh; padding:20px 16px 100px;}
+  .brand{display:flex; align-items:center; gap:10px; margin-bottom:8px;}
+  .logo{width:34px; height:34px; display:grid; place-items:center;}
+  .logo svg{width:34px; height:34px;}
+  .brand h1{font-size:20px; letter-spacing:6px; font-weight:600;}
+  .brand .sub{font-size:9px; letter-spacing:3px; color:var(--gray); margin-top:2px;}
+  .slogan{color:var(--orange); font-size:11px; letter-spacing:4px; margin:6px 0 26px;}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:18px; padding:18px; margin-bottom:14px;}
+  .card h2{font-size:13px; letter-spacing:3px; color:var(--orange); margin-bottom:14px; text-transform:uppercase;}
+  .row{display:flex; justify-content:space-between; font-size:14px; margin-bottom:10px;}
+  .row span:first-child{color:var(--gray);}
+  .key{background:#000; border:1px solid var(--line); border-radius:12px; padding:12px; font-size:11px; color:#cfcfcf; word-break:break-all; margin-top:6px; font-family:monospace;}
+  .btn{display:block; width:100%; padding:15px; border:none; border-radius:14px; font-size:15px; font-weight:600; letter-spacing:1px; cursor:pointer; margin-top:10px; transition:.2s;}
+  .btn-primary{background:var(--orange); color:#000;}
+  .btn-primary:active{transform:scale(.98); opacity:.9;}
+  .plans{display:flex; flex-direction:column; gap:10px;}
+  .plan{display:flex; justify-content:space-between; align-items:center; border:1px solid var(--line); border-radius:14px; padding:16px; cursor:pointer; transition:.2s;}
+  .plan.active{border-color:var(--orange); background:#110900;}
+  .plan .name{font-size:15px; font-weight:600;}
+  .plan .meta{font-size:11px; color:var(--gray); margin-top:4px;}
+  .plan .price{color:var(--orange); font-weight:700; font-size:16px; text-align:right;}
+  .plan .stars{font-size:11px; color:var(--gray); margin-top:2px; text-align:right;}
+  .footer{position:fixed; left:16px; right:16px; bottom:16px;}
+</style>
+</head>
+<body>
+
+  <div class="brand">
+    <div class="logo">
+      <svg viewBox="0 0 40 40" fill="none">
+        <g stroke="#FF6B00" stroke-width="2" stroke-linecap="round">
+          <line x1="20" y1="4" x2="20" y2="12"/>
+          <line x1="20" y1="28" x2="20" y2="36"/>
+          <line x1="4" y1="20" x2="12" y2="20"/>
+          <line x1="28" y1="20" x2="36" y2="20"/>
+          <line x1="8" y1="8" x2="14" y2="14"/>
+          <line x1="26" y1="26" x2="32" y2="32"/>
+          <line x1="32" y1="8" x2="26" y2="14"/>
+          <line x1="14" y1="26" x2="8" y2="32"/>
+        </g>
+      </svg>
+    </div>
+    <div>
+      <h1>GENUMM</h1>
+      <div class="sub">SPEED UP YOUR FREEDOM</div>
+    </div>
+  </div>
+  <div class="slogan">VPN · БЕЗ ГРАНИЦ</div>
+
+  <div class="card">
+    <h2>Мой профиль</h2>
+    <div class="row"><span>Статус</span><span id="status">—</span></div>
+    <div class="row"><span>Подписка до</span><span id="subEnd">—</span></div>
+    <div class="key" id="vpnKey">Ключ не выдан</div>
+    <button class="btn btn-primary" onclick="copyKey()">📋 Скопировать ключ</button>
+  </div>
+
+  <div class="card">
+    <h2>Тарифы</h2>
+    <div class="plans" id="plans">
+      <div class="plan" data-plan="1m">
+        <div><div class="name">1 месяц</div><div class="meta">30 дней</div></div>
+        <div><div class="price">299 ₽</div><div class="stars">150 ⭐</div></div>
+      </div>
+      <div class="plan active" data-plan="3m">
+        <div><div class="name">3 месяца</div><div class="meta">90 дней · выгода 15%</div></div>
+        <div><div class="price">799 ₽</div><div class="stars">400 ⭐</div></div>
+      </div>
+      <div class="plan" data-plan="1y">
+        <div><div class="name">1 год</div><div class="meta">365 дней · выгода 30%</div></div>
+        <div><div class="price">2490 ₽</div><div class="stars">1200 ⭐</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <button class="btn btn-primary" onclick="buyPlan()">Оформить подписку</button>
+  </div>
+
+<script>
+  const tg = window.Telegram?.WebApp;
+  if (tg) { tg.ready(); tg.expand(); tg.setHeaderColor('#000000'); tg.setBackgroundColor('#000000'); }
+
+  let selectedPlan = '3m';
+
+  document.querySelectorAll('.plan').forEach(el => {
+    el.addEventListener('click', () => {
+      document.querySelectorAll('.plan').forEach(p => p.classList.remove('active'));
+      el.classList.add('active');
+      selectedPlan = el.dataset.plan;
+    });
+  });
+
+  function loadProfile() {
+    const user = tg?.initDataUnsafe?.user;
+    document.getElementById('status').textContent = 'Активна (тест)';
+    document.getElementById('subEnd').textContent = new Date(Date.now() + 30*864e5).toLocaleDateString('ru-RU');
+    document.getElementById('vpnKey').textContent =
+      `vless://genumm-${user?.id || 'demo'}@vpn.genumm.com:443?type=tcp&security=reality#GenummVPN`;
+  }
+  loadProfile();
+
+  function copyKey() {
+    const txt = document.getElementById('vpnKey').textContent;
+    navigator.clipboard.writeText(txt).then(() => {
+      if (tg) tg.showAlert('Ключ скопирован ✅');
+    });
+  }
+
+  function buyPlan() {
+    if (tg) {
+      tg.showAlert(`Выбран тариф: ${selectedPlan}\n\nОплата доступна в боте: нажми «Купить подписку».`);
+      tg.close();
+    } else {
+      alert(`Выбран тариф: ${selectedPlan}`);
+    }
+  }
+</script>
+</body>
+</html>
