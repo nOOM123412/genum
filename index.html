@@ -7,128 +7,157 @@
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
   :root {
-    --bg: #000000;
-    --glass-bg: rgba(20, 20, 20, 0.6);
-    --glass-border: rgba(255, 255, 255, 0.08);
+    --bg: #050505;
+    --card-bg: rgba(255, 255, 255, 0.03);
+    --card-border: rgba(255, 255, 255, 0.08);
     --orange: #FF6B00;
+    --orange-glow: rgba(255, 107, 0, 0.2);
     --text-main: #ffffff;
-    --text-muted: #8e8e93;
-    --ios-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --text-muted: #888888;
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   }
 
-  * { box-sizing: border-box; margin: 0; padding: 0; font-family: var(--ios-font); -webkit-tap-highlight-color: transparent; }
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: var(--font); -webkit-tap-highlight-color: transparent; }
   
   body {
     background-color: var(--bg);
     color: var(--text-main);
     min-height: 100vh;
-    padding: 20px 16px 100px;
+    padding: 24px 20px 120px;
     overflow-x: hidden;
   }
 
-  /* Логотип и шапка */
-  .header { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; padding: 0 4px; }
-  .logo-icon { width: 36px; height: 36px; display: grid; place-items: center; }
-  .logo-icon svg { width: 36px; height: 36px; filter: drop-shadow(0 0 8px rgba(255,107,0,0.4)); }
-  .header h1 { font-size: 22px; letter-spacing: 5px; font-weight: 700; }
-  .header .sub { font-size: 9px; letter-spacing: 3px; color: var(--text-muted); margin-top: 2px; text-transform: uppercase; }
+  /* Шапка */
+  .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 32px; }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand-icon { width: 40px; height: 40px; filter: drop-shadow(0 0 12px var(--orange-glow)); }
+  .brand-text h1 { font-size: 24px; letter-spacing: 6px; font-weight: 700; line-height: 1; }
+  .brand-text .sub { font-size: 10px; letter-spacing: 4px; color: var(--text-muted); margin-top: 4px; text-transform: uppercase; }
 
-  /* Стеклянные карточки */
-  .glass-card {
-    background: var(--glass-bg);
-    border: 1px solid var(--glass-border);
+  /* Блоки */
+  .block {
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
     border-radius: 24px;
-    padding: 20px;
+    padding: 24px;
     margin-bottom: 16px;
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-    transition: transform 0.2s ease;
   }
 
-  .card-title { font-size: 12px; letter-spacing: 2px; color: var(--orange); margin-bottom: 16px; text-transform: uppercase; font-weight: 600; display: flex; align-items: center; gap: 8px;}
-  .card-title svg { width: 16px; height: 16px; fill: var(--orange); }
-  
-  .row { display: flex; justify-content: space-between; align-items: center; font-size: 15px; margin-bottom: 14px; }
-  .row:last-child { margin-bottom: 0; }
-  .row .label { color: var(--text-muted); }
-  .row .value { font-weight: 600; }
-  .status-active { color: #34c759; }
+  .block-title { font-size: 11px; letter-spacing: 2px; color: var(--text-muted); margin-bottom: 16px; text-transform: uppercase; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .block-title svg { width: 14px; height: 14px; fill: var(--orange); }
+
+  /* Профиль */
+  .profile-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .profile-row:last-child { margin-bottom: 0; }
+  .profile-label { color: var(--text-muted); font-size: 14px; }
+  .profile-value { font-size: 15px; font-weight: 600; }
+  .status-active { color: #34c759; text-shadow: 0 0 10px rgba(52, 199, 89, 0.3); }
   .status-inactive { color: #ff3b30; }
 
-  /* Блок с ключом */
-  .key-box {
-    background: rgba(0,0,0,0.5);
-    border: 1px solid var(--glass-border);
+  /* Ключ */
+  .key-container {
+    background: rgba(0,0,0,0.4);
+    border: 1px solid var(--card-border);
     border-radius: 16px;
-    padding: 14px;
-    font-size: 12px;
-    color: #d1d1d6;
-    word-break: break-all;
+    padding: 16px;
+    position: relative;
+    overflow: hidden;
+  }
+  .key-text {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    margin-top: 8px;
-    line-height: 1.4;
+    font-size: 13px; color: #ccc; word-break: break-all; line-height: 1.5;
   }
-
-  /* Кнопки */
-  .btn {
-    display: flex; align-items: center; justify-content: center; gap: 8px;
-    width: 100%; padding: 16px; border: none; border-radius: 18px;
-    font-size: 16px; font-weight: 600; cursor: pointer; transition: all 0.2s ease;
+  .key-copy-btn {
+    position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+    background: var(--card-border); border: none; border-radius: 10px;
+    padding: 8px; color: var(--text-main); cursor: pointer; transition: 0.2s;
   }
-  .btn svg { width: 20px; height: 20px; fill: currentColor; }
-  .btn:active { transform: scale(0.97); opacity: 0.8; }
-  
-  .btn-primary { background: var(--orange); color: #000; box-shadow: 0 4px 15px rgba(255, 107, 0, 0.3); }
-  .btn-glass { background: rgba(255, 255, 255, 0.1); color: var(--text-main); border: 1px solid var(--glass-border); }
-  .btn-glass:active { background: rgba(255, 255, 255, 0.15); }
+  .key-copy-btn:active { background: rgba(255,255,255,0.2); }
 
-  /* Тарифы (Сетка) */
+  /* Тарифы */
   .plans-grid { display: flex; flex-direction: column; gap: 12px; }
   .plan-card {
     display: flex; justify-content: space-between; align-items: center;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid var(--glass-border);
-    border-radius: 20px; padding: 18px;
-    cursor: pointer; transition: all 0.2s ease;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--card-border);
+    border-radius: 18px; padding: 16px 20px;
+    cursor: pointer; transition: all 0.2s;
   }
-  .plan-card.active { border-color: var(--orange); background: rgba(255, 107, 0, 0.08); }
+  .plan-card.active { border-color: var(--orange); background: rgba(255, 107, 0, 0.05); box-shadow: 0 4px 20px rgba(255, 107, 0, 0.1); }
   .plan-info .name { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
   .plan-info .meta { font-size: 12px; color: var(--text-muted); }
-  .plan-price { text-align: right; }
   .plan-price .rub { color: var(--orange); font-weight: 700; font-size: 18px; }
-  .plan-price .stars { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+  .plan-price .stars { font-size: 12px; color: var(--text-muted); margin-top: 2px; text-align: right; }
 
-  /* Экраны (вкладки) */
+  /* Кнопки */
+  .btn {
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    width: 100%; padding: 18px; border: none; border-radius: 18px;
+    font-size: 16px; font-weight: 600; cursor: pointer; transition: all 0.2s ease;
+  }
+  .btn:active { transform: scale(0.97); }
+  .btn-primary { 
+    background: var(--orange); color: #000; 
+    box-shadow: 0 8px 24px var(--orange-glow); 
+  }
+  .btn-glass { background: var(--card-bg); color: var(--text-main); border: 1px solid var(--card-border); }
+  .btn-glass:active { background: rgba(255,255,255,0.08); }
+  .btn svg { width: 20px; height: 20px; fill: currentColor; }
+
+  /* Экраны */
   .screen { display: none; animation: fadeIn 0.3s ease; }
   .screen.active { display: block; }
   @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
-  /* iOS Hotbar (Стеклянный) */
+  /* Нижнее меню */
   .hotbar {
-    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
-    width: calc(100% - 32px); max-width: 400px;
-    background: rgba(30, 30, 30, 0.7);
-    backdrop-filter: blur(25px); -webkit-backdrop-filter: blur(25px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 30px; display: flex; justify-content: space-around; padding: 8px;
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5); z-index: 100;
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    width: calc(100% - 40px); max-width: 400px;
+    background: rgba(20, 20, 20, 0.8);
+    backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--card-border);
+    border-radius: 32px; display: flex; padding: 6px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.6); z-index: 100;
   }
   .tab-btn {
     flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
-    padding: 8px 0; background: transparent; border: none; color: var(--text-muted);
-    font-size: 10px; font-weight: 500; cursor: pointer; transition: color 0.2s;
+    padding: 10px 0; background: transparent; border: none; color: var(--text-muted);
+    font-size: 10px; font-weight: 600; cursor: pointer; transition: 0.2s; border-radius: 26px;
   }
-  .tab-btn svg { width: 24px; height: 24px; margin-bottom: 4px; fill: currentColor; }
-  .tab-btn.active { color: var(--orange); }
+  .tab-btn svg { width: 22px; height: 22px; margin-bottom: 4px; fill: currentColor; }
+  .tab-btn.active { color: var(--orange); background: rgba(255, 107, 0, 0.1); }
+
+  /* Модальное окно поддержки */
+  .modal-overlay {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.8); backdrop-filter: blur(5px);
+    display: none; align-items: flex-end; z-index: 200;
+    opacity: 0; transition: opacity 0.3s;
+  }
+  .modal-overlay.active { display: flex; opacity: 1; }
+  .modal-content {
+    background: #111; width: 100%; border-radius: 32px 32px 0 0;
+    padding: 24px; transform: translateY(100%); transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    border-top: 1px solid var(--card-border);
+  }
+  .modal-overlay.active .modal-content { transform: translateY(0); }
+  .modal-title { font-size: 18px; font-weight: 600; margin-bottom: 16px; text-align: center; }
+  .modal-input {
+    width: 100%; background: rgba(255,255,255,0.05); border: 1px solid var(--card-border);
+    border-radius: 16px; padding: 16px; color: #fff; font-size: 15px; resize: none;
+    outline: none; margin-bottom: 16px; font-family: var(--font);
+  }
+  .modal-input:focus { border-color: var(--orange); }
 </style>
 </head>
 <body>
 
   <!-- Шапка -->
   <div class="header">
-    <div class="logo-icon">
-      <svg viewBox="0 0 40 40" fill="none">
+    <div class="brand">
+      <svg class="brand-icon" viewBox="0 0 40 40" fill="none">
         <g stroke="var(--orange)" stroke-width="2.5" stroke-linecap="round">
           <line x1="20" y1="2" x2="20" y2="12"/><line x1="20" y1="28" x2="20" y2="38"/>
           <line x1="2" y1="20" x2="12" y2="20"/><line x1="28" y1="20" x2="38" y2="20"/>
@@ -136,52 +165,51 @@
           <line x1="34" y1="6" x2="27" y2="13"/><line x1="13" y1="27" x2="6" y2="34"/>
         </g>
       </svg>
-    </div>
-    <div>
-      <h1>GENUMM</h1>
-      <div class="sub">Speed up your freedom</div>
+      <div class="brand-text">
+        <h1>GENUMM</h1>
+        <div class="sub">Speed up your freedom</div>
+      </div>
     </div>
   </div>
 
   <!-- ================= ЭКРАН 1: ГЛАВНАЯ ================= -->
   <div id="screen-home" class="screen active">
     
-    <div class="glass-card">
-      <div class="card-title">
+    <div class="block">
+      <div class="block-title">
         <svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
-        Мой профиль
+        Личный кабинет
       </div>
-      <div class="row">
-        <span class="label">Статус</span>
-        <span id="status" class="value status-inactive">Загрузка...</span>
+      <div class="profile-row">
+        <span class="profile-label">Статус</span>
+        <span id="status" class="profile-value status-inactive">Загрузка...</span>
       </div>
-      <div class="row">
-        <span class="label">Подписка до</span>
-        <span id="subEnd" class="value">—</span>
+      <div class="profile-row">
+        <span class="profile-label">Подписка до</span>
+        <span id="subEnd" class="profile-value">—</span>
       </div>
     </div>
 
-    <div class="glass-card">
-      <div class="card-title">
+    <div class="block">
+      <div class="block-title">
         <svg viewBox="0 0 24 24"><path d="M12.65 10C11.83 7.67 9.61 6 7 6c-3.31 0-6 2.69-6 6s2.69 6 6 6c2.61 0 4.83-1.67 5.65-4H17v4h4v-4h2v-4H12.65zM7 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/></svg>
-        Ваш ключ доступа
+        Ключ доступа
       </div>
-      <div class="key-box" id="vpnKey">Получение ключа...</div>
-      <button class="btn btn-glass" style="margin-top: 12px;" onclick="copyKey()">
-        <svg viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>
-        Скопировать
-      </button>
+      <div class="key-container">
+        <div class="key-text" id="vpnKey">Получение...</div>
+        <button class="key-copy-btn" onclick="copyKey()">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+        </button>
+      </div>
     </div>
 
-    <div class="glass-card">
-      <div class="card-title">
+    <div class="block">
+      <div class="block-title">
         <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25z"/></svg>
-        Помощь
+        Поддержка
       </div>
-      <div class="row" style="margin-bottom: 16px;">
-        <span class="label" style="font-size: 13px;">Возникли вопросы? Напишите нам.</span>
-      </div>
-      <button class="btn btn-glass" onclick="openSupport()">
+      <div class="profile-label" style="margin-bottom: 16px; line-height: 1.4;">Возникли вопросы по работе сервиса? Напишите нам, и мы ответим в ЛС.</div>
+      <button class="btn btn-glass" onclick="openSupportModal()">
         <svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"/></svg>
         Написать в поддержку
       </button>
@@ -191,21 +219,21 @@
 
   <!-- ================= ЭКРАН 2: МАГАЗИН ================= -->
   <div id="screen-shop" class="screen">
-    <div class="glass-card" style="padding: 16px;">
-      <div class="card-title" style="margin-bottom: 8px;">
+    <div class="block">
+      <div class="block-title">
         <svg viewBox="0 0 24 24"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg>
         Выберите тариф
       </div>
       <div class="plans-grid" id="plans">
-        <div class="plan-card" data-plan="1m" data-stars="150">
+        <div class="plan-card" data-plan="1m">
           <div class="plan-info"><div class="name">1 месяц</div><div class="meta">30 дней</div></div>
           <div class="plan-price"><div class="rub">299 ₽</div><div class="stars">150 ⭐</div></div>
         </div>
-        <div class="plan-card active" data-plan="3m" data-stars="400">
+        <div class="plan-card active" data-plan="3m">
           <div class="plan-info"><div class="name">3 месяца</div><div class="meta">90 дней · выгода 15%</div></div>
           <div class="plan-price"><div class="rub">799 ₽</div><div class="stars">400 ⭐</div></div>
         </div>
-        <div class="plan-card" data-plan="1y" data-stars="1200">
+        <div class="plan-card" data-plan="1y">
           <div class="plan-info"><div class="name">1 год</div><div class="meta">365 дней · выгода 30%</div></div>
           <div class="plan-price"><div class="rub">2490 ₽</div><div class="stars">1200 ⭐</div></div>
         </div>
@@ -213,18 +241,14 @@
     </div>
 
     <div style="padding: 0 8px;">
-      <button class="btn btn-primary" onclick="buyStars()">
-        <svg viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
-        Оплатить Stars
-      </button>
-      <button class="btn btn-glass" style="margin-top: 12px;" onclick="buySBP()">
+      <button class="btn btn-primary" onclick="checkout()">
         <svg viewBox="0 0 24 24"><path d="M20 4H4c-1.11 0-1.99.89-1.99 2L2 18c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V6c0-1.11-.89-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z"/></svg>
-        Оплатить СБП (карта)
+        Перейти к оплате
       </button>
     </div>
   </div>
 
-  <!-- ================= HOTBAR (НИЖНЕЕ МЕНЮ) ================= -->
+  <!-- ================= HOTBAR ================= -->
   <div class="hotbar">
     <button class="tab-btn active" onclick="switchTab('home')" id="tab-home">
       <svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
@@ -236,9 +260,18 @@
     </button>
   </div>
 
+  <!-- МОДАЛКА ПОДДЕРЖКИ -->
+  <div class="modal-overlay" id="supportModal" onclick="closeSupportModal(event)">
+    <div class="modal-content" onclick="event.stopPropagation()">
+      <div class="modal-title">Служба поддержки</div>
+      <textarea class="modal-input" id="supportText" rows="3" placeholder="Опишите вашу проблему..."></textarea>
+      <button class="btn btn-primary" onclick="sendSupport()">Отправить</button>
+    </div>
+  </div>
+
 <script>
   const tg = window.Telegram?.WebApp;
-  if (tg) { tg.ready(); tg.expand(); tg.setHeaderColor('#000000'); tg.setBackgroundColor('#000000'); }
+  if (tg) { tg.ready(); tg.expand(); tg.setHeaderColor('#050505'); tg.setBackgroundColor('#050505'); }
 
   let selectedPlan = '3m';
 
@@ -263,19 +296,15 @@
     const initData = tg?.initData;
     if (!initData) {
       document.getElementById('status').textContent = 'Откройте в TG';
-      document.getElementById('status').className = 'value status-inactive';
-      document.getElementById('vpnKey').textContent = 'Доступно только в Mini App';
       return;
     }
-
     try {
       const res = await fetch('/api/profile', { headers: { 'X-Telegram-Init-Data': initData } });
-      if (!res.ok) throw new Error();
       const data = await res.json();
-      
       const isActive = !!data.sub_end;
+      
       document.getElementById('status').textContent = isActive ? 'Активна' : 'Не активна';
-      document.getElementById('status').className = `value ${isActive ? 'status-active' : 'status-inactive'}`;
+      document.getElementById('status').className = `profile-value ${isActive ? 'status-active' : 'status-inactive'}`;
       document.getElementById('subEnd').textContent = isActive 
         ? new Date(data.sub_end).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }) 
         : '—';
@@ -288,27 +317,42 @@
 
   function copyKey() {
     const txt = document.getElementById('vpnKey').textContent;
-    if (txt.includes('Ключ не выдан') || txt.includes('Получение') || txt.includes('Доступно только')) return;
+    if (txt.includes('Ключ не выдан') || txt.includes('Получение')) return;
     navigator.clipboard.writeText(txt).then(() => {
       if (tg) { tg.HapticFeedback.notificationOccurred('success'); tg.showAlert('Ключ скопирован'); }
-      else alert('Скопировано');
     });
   }
 
-  function openSupport() {
-    const url = 'https://t.me/your_support_username'; // ЗАМЕНИ
-    if (tg) tg.openTelegramLink(url); else window.open(url, '_blank');
+  // --- Поддержка ---
+  function openSupportModal() {
+    document.getElementById('supportModal').classList.add('active');
+    if (tg) tg.HapticFeedback.impactOccurred('medium');
   }
 
-  function buyStars() {
-    if (!tg) return;
-    tg.sendData(JSON.stringify({ action: 'buy_stars', plan: selectedPlan }));
-    tg.close();
+  function closeSupportModal(e) {
+    if (e.target.id === 'supportModal') {
+      document.getElementById('supportModal').classList.remove('active');
+    }
   }
 
-  function buySBP() {
+  function sendSupport() {
+    const text = document.getElementById('supportText').value.trim();
+    if (!text) {
+      if (tg) tg.showAlert('Введите текст сообщения');
+      return;
+    }
+    
+    // Отправляем в бот
+    if (tg) {
+      tg.sendData(JSON.stringify({ action: 'support', text: text }));
+      tg.close();
+    }
+  }
+
+  // --- Оплата ---
+  function checkout() {
     if (!tg) return;
-    tg.sendData(JSON.stringify({ action: 'buy_sbp', plan: selectedPlan }));
+    tg.sendData(JSON.stringify({ action: 'checkout', plan: selectedPlan }));
     tg.close();
   }
 </script>
