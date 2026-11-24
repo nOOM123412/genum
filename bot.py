@@ -12,7 +12,8 @@ from aiogram import Bot, Dispatcher, Router, F
 from aiogram.filters import Command, CommandStart
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton,
-    WebAppInfo, LabeledPrice, PreCheckoutQuery, MenuButtonWebApp
+    WebAppInfo, LabeledPrice, PreCheckoutQuery, MenuButtonWebApp,
+    FSInputFile, InputMediaPhoto
 )
 from sqlalchemy import BigInteger, String, DateTime, Integer
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -23,16 +24,54 @@ from aiohttp import web
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip().isdigit()]
 PORT = int(os.getenv("PORT", 3000))
+SUPPORT_USERNAME = os.getenv("SUPPORT_USERNAME", "").lstrip("@")
 
 WEBAPP_URL = os.getenv("WEBAPP_URL", "https://example.com").strip()
 if not WEBAPP_URL.startswith("http"):
     WEBAPP_URL = f"https://{WEBAPP_URL}"
 
-# Курс конвертации в Stars задаётся здесь, пользователю показывается только при выборе Stars
+BANNER_PATH = "1.jpeg"
+
+# Telegram Bot API 9.4+ поддерживает цвет кнопок (style="success" | "primary" | "danger")
+# и кастомные эмодзи (icon_custom_emoji_id). Если установлен aiogram < 3.25 без этих полей,
+# helper ниже автоматически подставит обычные параметры без падения.
+def styled_btn(text: str, style: str | None = None, icon_id: str | None = None, **kwargs) -> InlineKeyboardButton:
+    params = {"text": text, **kwargs}
+    if style:
+        params["style"] = style
+    if icon_id:
+        params["icon_custom_emoji_id"] = icon_id
+    try:
+        return InlineKeyboardButton(**params)
+    except Exception:
+        return InlineKeyboardButton(text=text, **kwargs)
+
+# Опциональные ID кастомных эмодзи из ENV (если захочешь поставить свои Telegram Custom Emoji)
+EMOJI = {
+    "buy": os.getenv("EMOJI_BUY"),
+    "gb": os.getenv("EMOJI_GB"),
+    "subs": os.getenv("EMOJI_SUBS"),
+    "invite": os.getenv("EMOJI_INVITE"),
+    "gift": os.getenv("EMOJI_GIFT"),
+    "profile": os.getenv("EMOJI_PROFILE"),
+    "guide": os.getenv("EMOJI_GUIDE"),
+    "support": os.getenv("EMOJI_SUPPORT"),
+    "pay": os.getenv("EMOJI_PAY"),
+    "balance": os.getenv("EMOJI_BALANCE"),
+    "promo": os.getenv("EMOJI_PROMO"),
+    "lang": os.getenv("EMOJI_LANG"),
+}
+
 PLANS = {
     "1m": {"name": "1 месяц",  "price_rub": 299,  "price_stars": 150,  "days": 30},
     "3m": {"name": "3 месяца", "price_rub": 799,  "price_stars": 400,  "days": 90},
     "1y": {"name": "1 год",    "price_rub": 2490, "price_stars": 1200, "days": 365},
+}
+
+GB_PACKS = {
+    "gb50":  {"name": "+50 ГБ",  "price_rub": 149, "price_stars": 75,  "gb": 50},
+    "gb150": {"name": "+150 ГБ", "price_rub": 349, "price_stars": 175, "gb": 150},
+    "gb500": {"name": "+500 ГБ", "price_rub": 790, "price_stars": 395, "gb": 500},
 }
 
 logging.basicConfig(level=logging.INFO)
@@ -46,16 +85,20 @@ class User(Base):
     __tablename__ = "users"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     username: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    balance_rub: Mapped[int] = mapped_column(Integer, default=0)
+    extra_gb: Mapped[int] = mapped_column(Integer, default=0)
+    invited_count: Mapped[int] = mapped_column(Integer, default=0)
     sub_end: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     vpn_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
     last_bot_msg_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_msg_has_photo: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 class Payment(Base):
     __tablename__ = "payments"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(BigInteger, index=True)
-    plan_id: Mapped[str] = mapped_column(String(8))
+    plan_id: Mapped[str] = mapped_column(String(16))
     method: Mapped[str] = mapped_column(String(16))
     amount: Mapped[int] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(16), default="pending")
@@ -94,6 +137,16 @@ async def extend_subscription(session: AsyncSession, tg_id: int, days: int, plan
     await session.commit()
     return user
 
+async def add_extra_gb(session: AsyncSession, tg_id: int, gb: int, pack_id: str, method: str, amount: int, status: str = "paid"):
+    user = await session.get(User, tg_id)
+    if not user:
+        user = User(id=tg_id)
+        session.add(user)
+    user.extra_gb = (user.extra_gb or 0) + gb
+    session.add(Payment(user_id=tg_id, plan_id=pack_id, method=method, amount=amount, status=status))
+    await session.commit()
+    return user
+
 # 🔐 ВЕРИФИКАЦИЯ INIT DATA
 def verify_telegram_init_data(init_data: str, bot_token: str) -> dict | None:
     try:
@@ -119,72 +172,154 @@ def extract_tg_user(request: web.Request) -> dict | None:
         return None
     return user_data
 
-# ⌨️ КЛАВИАТУРЫ И ТЕКСТЫ
+# ⌨️ ТЕКСТЫ И КЛАВИАТУРЫ (ПО СКРИНШОТАМ 1, 2, 3)
 WELCOME_TEXT = (
-    "<b>GenummVPN</b>\n"
-    "<i>Speed up your freedom</i>\n\n"
+    "👋 <b>Добро пожаловать в главное меню!</b>\n\n"
+    "⚡ <b>GenummVPN</b> — <i>Speed up your freedom</i>\n\n"
     "Выберите действие:"
 )
 
 def main_menu():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 Купить подписку", callback_data="menu_buy")],
-        [InlineKeyboardButton(text="📊 Продлить / Тарифы", callback_data="menu_buy")],
-        [InlineKeyboardButton(text="👤 Мой профиль", callback_data="menu_profile")],
+        [styled_btn("🛍 Купить VPN", style="success", icon_id=EMOJI["buy"], callback_data="menu_buy")],
+        [styled_btn("📶 Пополнить ГБ", style="success", icon_id=EMOJI["gb"], callback_data="menu_gb")],
+        [styled_btn("🔗 Мои подписки", style="primary", icon_id=EMOJI["subs"], callback_data="menu_subs")],
+        [styled_btn("👥 Пригласить друзей", style="primary", icon_id=EMOJI["invite"], callback_data="menu_invite")],
+        [styled_btn("🎁 Подарить VPN", style="primary", icon_id=EMOJI["gift"], callback_data="menu_gift")],
         [
-            InlineKeyboardButton(text="🔑 Мой ключ", callback_data="menu_key"),
-            InlineKeyboardButton(text="📖 Инструкции", callback_data="menu_guide"),
+            styled_btn("👤 Мой профиль", style="primary", icon_id=EMOJI["profile"], callback_data="menu_profile"),
+            styled_btn("📖 Инструкции", style="primary", icon_id=EMOJI["guide"], callback_data="menu_guide"),
         ],
-        [InlineKeyboardButton(text="🛠 Не работает?", callback_data="menu_troubleshoot")],
-        [InlineKeyboardButton(text="🚀 Открыть миниап", web_app=WebAppInfo(url=WEBAPP_URL))],
+        [styled_btn("🚀 Открыть миниап", style="primary", web_app=WebAppInfo(url=WEBAPP_URL))],
+        [styled_btn("Не работает VPN?", callback_data="menu_troubleshoot")],
+    ])
+
+def profile_menu():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [styled_btn("💳 Способы оплаты", style="success", icon_id=EMOJI["pay"], callback_data="profile_pay_methods")],
+        [styled_btn("💼 Управление балансом", style="primary", icon_id=EMOJI["balance"], callback_data="profile_balance")],
+        [styled_btn("🎟 Активировать промокод", style="primary", icon_id=EMOJI["promo"], callback_data="profile_promo")],
+        [styled_btn("🌐 Сменить язык / Change language", style="primary", icon_id=EMOJI["lang"], callback_data="profile_lang")],
+        [styled_btn("📜 Правила", style="primary", callback_data="profile_rules")],
+        [styled_btn("Назад", callback_data="back_to_menu")],
+    ])
+
+def troubleshoot_menu():
+    support_btn = (
+        styled_btn("👥 Поддержка", style="success", icon_id=EMOJI["support"], url=f"https://t.me/{SUPPORT_USERNAME}")
+        if SUPPORT_USERNAME
+        else styled_btn("👥 Поддержка", style="success", icon_id=EMOJI["support"], web_app=WebAppInfo(url=WEBAPP_URL))
+    )
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [support_btn],
+        [styled_btn("Главное меню", callback_data="back_to_menu")],
     ])
 
 def plans_menu():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="1 месяц · 299 ₽", callback_data="select_plan_1m")],
-        [InlineKeyboardButton(text="3 месяца · 799 ₽ (−15%)", callback_data="select_plan_3m")],
-        [InlineKeyboardButton(text="1 год · 2 490 ₽ (−30%)", callback_data="select_plan_1y")],
-        [InlineKeyboardButton(text="← Назад", callback_data="back_to_menu")],
+        [styled_btn("⚡ 1 месяц · 299 ₽", style="success", callback_data="select_plan_1m")],
+        [styled_btn("🔥 3 месяца · 799 ₽ (−15%)", style="success", callback_data="select_plan_3m")],
+        [styled_btn("👑 1 год · 2 490 ₽ (−30%)", style="primary", callback_data="select_plan_1y")],
+        [styled_btn("Назад", callback_data="back_to_menu")],
     ])
 
-def checkout_text(plan_id: str) -> str:
-    plan = PLANS[plan_id]
+def gb_menu():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [styled_btn("📶 +50 ГБ · 149 ₽", style="success", callback_data="select_gb_gb50")],
+        [styled_btn("📶 +150 ГБ · 349 ₽", style="success", callback_data="select_gb_gb150")],
+        [styled_btn("📶 +500 ГБ · 790 ₽", style="primary", callback_data="select_gb_gb500")],
+        [styled_btn("Назад", callback_data="back_to_menu")],
+    ])
+
+def checkout_text(item_id: str) -> str:
+    if item_id in PLANS:
+        item = PLANS[item_id]
+        return (
+            f"💳 <b>Оплата подписки</b>\n"
+            f"Тариф: <b>{item['name']}</b> · <b>{item['price_rub']} ₽</b>\n\n"
+            f"Выберите способ оплаты:"
+        )
+    item = GB_PACKS[item_id]
     return (
-        f"💳 <b>Оплата подписки</b>\n"
-        f"Тариф: <b>{plan['name']}</b> · <b>{plan['price_rub']} ₽</b>\n\n"
+        f"📶 <b>Пополнение трафика</b>\n"
+        f"Пакет: <b>{item['name']}</b> · <b>{item['price_rub']} ₽</b>\n\n"
         f"Выберите способ оплаты:"
     )
 
-def pay_methods_kb(plan_id: str):
+def pay_methods_kb(item_id: str):
+    back_cb = "menu_buy" if item_id in PLANS else "menu_gb"
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⭐ Telegram Stars", callback_data=f"pay_stars_{plan_id}")],
-        [InlineKeyboardButton(text="🏦 СБП (карта РФ)", callback_data=f"pay_sbp_{plan_id}")],
-        [InlineKeyboardButton(text="💎 Криптовалюта", callback_data=f"pay_crypto_{plan_id}")],
-        [InlineKeyboardButton(text="← К тарифам", callback_data="menu_buy")],
+        [styled_btn("⭐ Telegram Stars", style="primary", callback_data=f"pay_stars_{item_id}")],
+        [styled_btn("🏦 СБП (карта РФ)", style="success", callback_data=f"pay_sbp_{item_id}")],
+        [styled_btn("💎 Криптовалюта", style="primary", callback_data=f"pay_crypto_{item_id}")],
+        [styled_btn("Назад", callback_data=back_cb)],
     ])
 
-def back_menu_kb():
+def back_kb(target: str = "back_to_menu"):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="← Назад", callback_data="back_to_menu")],
+        [styled_btn("Назад", callback_data=target)],
     ])
 
-async def send_or_replace_bot_message(bot: Bot, session: AsyncSession, user: User, text: str, reply_markup: InlineKeyboardMarkup):
-    # Удаляет предыдущее рабочее сообщение бота, чтобы в чате не копился мусор
+# 🖼️ ЕДИНЫЙ РЕНДЕР С ФОТО 1.jpeg И БЕЗ СПАМА В ЧАТЕ
+async def render_screen(
+    bot: Bot,
+    session: AsyncSession,
+    user: User,
+    text: str,
+    reply_markup: InlineKeyboardMarkup,
+    cb: CallbackQuery | None = None
+):
+    has_banner = os.path.exists(BANNER_PATH)
+
+    # 1) Если это нажатие на inline-кнопку — пробуем плавно отредактировать текущее сообщение
+    if cb and cb.message:
+        try:
+            if has_banner and cb.message.photo:
+                await cb.message.edit_media(
+                    media=InputMediaPhoto(media=FSInputFile(BANNER_PATH), caption=text, parse_mode="HTML"),
+                    reply_markup=reply_markup
+                )
+                return
+            elif not has_banner and not cb.message.photo:
+                await cb.message.edit_text(
+                    text=text,
+                    reply_markup=reply_markup,
+                    parse_mode="HTML",
+                    disable_web_page_preview=True
+                )
+                return
+        except Exception as e:
+            if "message is not modified" in str(e).lower():
+                return
+
+    # 2) Иначе удаляем старое сообщение бота и отправляем новое с 1.jpeg
     if user.last_bot_msg_id:
         try:
             await bot.delete_message(chat_id=user.id, message_id=user.last_bot_msg_id)
         except Exception:
             pass
-    msg = await bot.send_message(
-        chat_id=user.id,
-        text=text,
-        reply_markup=reply_markup,
-        parse_mode="HTML",
-        disable_web_page_preview=True
-    )
+
+    if has_banner:
+        msg = await bot.send_photo(
+            chat_id=user.id,
+            photo=FSInputFile(BANNER_PATH),
+            caption=text,
+            reply_markup=reply_markup,
+            parse_mode="HTML"
+        )
+        user.last_msg_has_photo = 1
+    else:
+        msg = await bot.send_message(
+            chat_id=user.id,
+            text=text,
+            reply_markup=reply_markup,
+            parse_mode="HTML",
+            disable_web_page_preview=True
+        )
+        user.last_msg_has_photo = 0
+
     user.last_bot_msg_id = msg.message_id
     await session.commit()
-    return msg
 
 # 🌐 ВЕБ-СЕРВЕР (API + FRONTEND)
 async def handle_index(request: web.Request):
@@ -206,7 +341,9 @@ async def handle_profile(request: web.Request):
             "id": user.id,
             "username": user.username,
             "sub_end": user.sub_end.isoformat() if user.sub_end else None,
-            "vpn_key": user.vpn_key
+            "vpn_key": user.vpn_key,
+            "extra_gb": user.extra_gb,
+            "balance_rub": user.balance_rub
         })
 
 async def handle_checkout(request: web.Request):
@@ -229,7 +366,7 @@ async def handle_checkout(request: web.Request):
     try:
         async with SessionLocal() as session:
             user = await get_or_create_user(session, tg_id, user_data.get("username"))
-            await send_or_replace_bot_message(
+            await render_screen(
                 bot, session, user,
                 text=checkout_text(plan_id),
                 reply_markup=pay_methods_kb(plan_id)
@@ -295,170 +432,321 @@ async def cmd_start(message: Message, bot: Bot):
         pass
     async with SessionLocal() as session:
         user = await get_or_create_user(session, message.from_user.id, message.from_user.username)
-        await send_or_replace_bot_message(
-            bot, session, user,
-            text=WELCOME_TEXT,
-            reply_markup=main_menu()
-        )
+        await render_screen(bot, session, user, WELCOME_TEXT, main_menu())
 
-# --- Навигация главного меню ---
+# --- Главное меню и разделы ---
 @router.callback_query(F.data == "back_to_menu")
-async def back_to_menu(cb: CallbackQuery):
-    await cb.message.edit_text(
-        WELCOME_TEXT,
-        reply_markup=main_menu(),
-        parse_mode="HTML"
-    )
+async def back_to_menu(cb: CallbackQuery, bot: Bot):
+    async with SessionLocal() as session:
+        user = await get_or_create_user(session, cb.from_user.id, cb.from_user.username)
+        await render_screen(bot, session, user, WELCOME_TEXT, main_menu(), cb=cb)
     await cb.answer()
 
 @router.callback_query(F.data == "menu_buy")
-async def menu_buy(cb: CallbackQuery):
-    await cb.message.edit_text(
-        "💎 <b>Выберите тариф GenummVPN</b>",
-        reply_markup=plans_menu(),
-        parse_mode="HTML"
-    )
+async def menu_buy(cb: CallbackQuery, bot: Bot):
+    async with SessionLocal() as session:
+        user = await get_or_create_user(session, cb.from_user.id, cb.from_user.username)
+        await render_screen(
+            bot, session, user,
+            "🛍 <b>Купить VPN</b>\n\nВыберите подходящий тариф:",
+            plans_menu(),
+            cb=cb
+        )
+    await cb.answer()
+
+@router.callback_query(F.data == "menu_gb")
+async def menu_gb(cb: CallbackQuery, bot: Bot):
+    async with SessionLocal() as session:
+        user = await get_or_create_user(session, cb.from_user.id, cb.from_user.username)
+        await render_screen(
+            bot, session, user,
+            f"📶 <b>Пополнить ГБ</b>\n"
+            f"Дополнительный пакет: <b>{user.extra_gb} ГБ</b>\n\n"
+            f"Выберите объём трафика:",
+            gb_menu(),
+            cb=cb
+        )
     await cb.answer()
 
 @router.callback_query(F.data.startswith("select_plan_"))
-async def select_plan(cb: CallbackQuery):
+async def select_plan(cb: CallbackQuery, bot: Bot):
     plan_id = cb.data.split("_")[2]
     if plan_id not in PLANS:
         await cb.answer("Тариф не найден", show_alert=True)
         return
-    await cb.message.edit_text(
-        checkout_text(plan_id),
-        reply_markup=pay_methods_kb(plan_id),
-        parse_mode="HTML"
-    )
+    async with SessionLocal() as session:
+        user = await get_or_create_user(session, cb.from_user.id, cb.from_user.username)
+        await render_screen(bot, session, user, checkout_text(plan_id), pay_methods_kb(plan_id), cb=cb)
     await cb.answer()
 
-@router.callback_query(F.data == "menu_profile")
-async def menu_profile(cb: CallbackQuery):
+@router.callback_query(F.data.startswith("select_gb_"))
+async def select_gb(cb: CallbackQuery, bot: Bot):
+    pack_id = cb.data.split("_")[2]
+    if pack_id not in GB_PACKS:
+        await cb.answer("Пакет не найден", show_alert=True)
+        return
+    async with SessionLocal() as session:
+        user = await get_or_create_user(session, cb.from_user.id, cb.from_user.username)
+        await render_screen(bot, session, user, checkout_text(pack_id), pay_methods_kb(pack_id), cb=cb)
+    await cb.answer()
+
+@router.callback_query(F.data == "menu_subs")
+async def menu_subs(cb: CallbackQuery, bot: Bot):
     async with SessionLocal() as session:
         user = await get_or_create_user(session, cb.from_user.id, cb.from_user.username)
         now = datetime.utcnow()
         is_active = bool(user.sub_end and user.sub_end > now)
-        sub_str = (
-            user.sub_end.strftime("%d.%m.%Y %H:%M UTC")
-            if is_active else "Нет активной подписки"
-        )
-        await cb.message.edit_text(
-            f"👤 <b>Мой профиль</b>\n\n"
-            f"ID: <code>{user.id}</code>\n"
-            f"Подписка до: <b>{sub_str}</b>",
-            reply_markup=back_menu_kb(),
-            parse_mode="HTML"
+        if is_active:
+            sub_info = (
+                f"✅ <b>Статус:</b> Активна\n"
+                f"📅 <b>Действует до:</b> {user.sub_end.strftime('%d.%m.%Y %H:%M UTC')}\n"
+                f"📶 <b>Доп. трафик:</b> {user.extra_gb} ГБ\n\n"
+                f"🔑 <b>Ваш ключ доступа:</b>\n<code>{user.vpn_key}</code>"
+            )
+        else:
+            sub_info = (
+                "❌ <b>Активных подписок нет</b>\n\n"
+                "Оформите подписку в разделе «Купить VPN» или в миниапе."
+            )
+        await render_screen(
+            bot, session, user,
+            f"🔗 <b>Мои подписки</b>\n\n{sub_info}",
+            InlineKeyboardMarkup(inline_keyboard=[
+                [styled_btn("🛍 Купить VPN", style="success", callback_data="menu_buy")],
+                [styled_btn("Назад", callback_data="back_to_menu")],
+            ]),
+            cb=cb
         )
     await cb.answer()
 
-@router.callback_query(F.data == "menu_key")
-async def menu_key(cb: CallbackQuery):
+@router.callback_query(F.data == "menu_invite")
+async def menu_invite(cb: CallbackQuery, bot: Bot):
+    bot_me = await bot.get_me()
+    ref_link = f"https://t.me/{bot_me.username}?start=ref_{cb.from_user.id}"
+    async with SessionLocal() as session:
+        user = await get_or_create_user(session, cb.from_user.id, cb.from_user.username)
+        await render_screen(
+            bot, session, user,
+            f"👥 <b>Пригласить друзей</b>\n\n"
+            f"Приглашено друзей: <b>{user.invited_count}</b>\n"
+            f"Делитесь персональной ссылкой и получайте бонусные дни за каждого друга:\n\n"
+            f"<code>{ref_link}</code>",
+            back_kb("back_to_menu"),
+            cb=cb
+        )
+    await cb.answer()
+
+@router.callback_query(F.data == "menu_gift")
+async def menu_gift(cb: CallbackQuery, bot: Bot):
+    async with SessionLocal() as session:
+        user = await get_or_create_user(session, cb.from_user.id, cb.from_user.username)
+        await render_screen(
+            bot, session, user,
+            "🎁 <b>Подарить VPN</b>\n\n"
+            "Выберите тариф для подарочного сертификата — после оплаты вы получите ключ, который можно переслать другу:",
+            plans_menu(),
+            cb=cb
+        )
+    await cb.answer()
+
+# --- Профиль (полностью по скрину 3) ---
+@router.callback_query(F.data == "menu_profile")
+async def menu_profile(cb: CallbackQuery, bot: Bot):
     async with SessionLocal() as session:
         user = await get_or_create_user(session, cb.from_user.id, cb.from_user.username)
         now = datetime.utcnow()
-        is_active = bool(user.sub_end and user.sub_end > now and user.vpn_key)
-        if is_active:
-            body = f"<code>{user.vpn_key}</code>"
-        else:
-            body = "Ключ появится после оформления подписки."
-        await cb.message.edit_text(
-            f"🔑 <b>Ваш ключ доступа</b>\n\n{body}",
-            reply_markup=back_menu_kb(),
-            parse_mode="HTML"
+        active_subs = 1 if (user.sub_end and user.sub_end > now) else 0
+        display_name = cb.from_user.username or cb.from_user.first_name or str(user.id)
+        text = (
+            f"👤 <b>Мой профиль</b>\n\n"
+            f"<b>Пользователь:</b> {display_name}\n"
+            f"<b>Баланс:</b> {user.balance_rub}₽\n"
+            f"<b>Приглашено друзей:</b> {user.invited_count}\n"
+            f"<b>Активных подписок:</b> {active_subs}"
+        )
+        await render_screen(bot, session, user, text, profile_menu(), cb=cb)
+    await cb.answer()
+
+@router.callback_query(F.data == "profile_pay_methods")
+async def profile_pay_methods(cb: CallbackQuery, bot: Bot):
+    async with SessionLocal() as session:
+        user = await get_or_create_user(session, cb.from_user.id, cb.from_user.username)
+        await render_screen(
+            bot, session, user,
+            "💳 <b>Способы оплаты</b>\n\n"
+            "Доступны оплата через <b>СБП (карты РФ)</b>, <b>Telegram Stars</b> и <b>криптовалюту (CryptoBot)</b>.",
+            back_kb("menu_profile"),
+            cb=cb
         )
     await cb.answer()
 
+@router.callback_query(F.data == "profile_balance")
+async def profile_balance(cb: CallbackQuery, bot: Bot):
+    async with SessionLocal() as session:
+        user = await get_or_create_user(session, cb.from_user.id, cb.from_user.username)
+        await render_screen(
+            bot, session, user,
+            f"💼 <b>Управление балансом</b>\n\n"
+            f"Текущий баланс: <b>{user.balance_rub}₽</b>\n"
+            f"Средства с баланса автоматически списываются при продлении подписки.",
+            back_kb("menu_profile"),
+            cb=cb
+        )
+    await cb.answer()
+
+@router.callback_query(F.data == "profile_promo")
+async def profile_promo(cb: CallbackQuery, bot: Bot):
+    async with SessionLocal() as session:
+        user = await get_or_create_user(session, cb.from_user.id, cb.from_user.username)
+        await render_screen(
+            bot, session, user,
+            "🎟 <b>Активировать промокод</b>\n\n"
+            "Отправьте промокод в чат командой <code>/promo КОД</code>.",
+            back_kb("menu_profile"),
+            cb=cb
+        )
+    await cb.answer()
+
+@router.callback_query(F.data == "profile_lang")
+async def profile_lang(cb: CallbackQuery, bot: Bot):
+    async with SessionLocal() as session:
+        user = await get_or_create_user(session, cb.from_user.id, cb.from_user.username)
+        await render_screen(
+            bot, session, user,
+            "🌐 <b>Сменить язык / Change language</b>\n\n"
+            "Текущий язык интерфейса: <b>Русский 🇷🇺</b>",
+            back_kb("menu_profile"),
+            cb=cb
+        )
+    await cb.answer()
+
+@router.callback_query(F.data == "profile_rules")
+async def profile_rules(cb: CallbackQuery, bot: Bot):
+    async with SessionLocal() as session:
+        user = await get_or_create_user(session, cb.from_user.id, cb.from_user.username)
+        await render_screen(
+            bot, session, user,
+            "📜 <b>Правила сервиса GenummVPN</b>\n\n"
+            "• Один ключ предназначен для личного использования.\n"
+            "• Запрещены DDoS-атаки, спам и противоправная активность.\n"
+            "• При нарушении правил доступ приостанавливается без возврата средств.",
+            back_kb("menu_profile"),
+            cb=cb
+        )
+    await cb.answer()
+
+# --- Инструкции ---
 @router.callback_query(F.data == "menu_guide")
-async def menu_guide(cb: CallbackQuery):
-    await cb.message.edit_text(
-        "📖 <b>Инструкция по подключению</b>\n\n"
-        "1. Оформите подписку и скопируйте ключ в миниапе или разделе «Мой ключ».\n"
-        "2. Установите клиент: <b>Streisand</b> / <b>Hiddify</b> (iOS, macOS, Windows, Android) или <b>v2rayNG</b> (Android).\n"
-        "3. Вставьте ключ из буфера обмена и нажмите «Подключить».",
-        reply_markup=back_menu_kb(),
-        parse_mode="HTML"
-    )
+async def menu_guide(cb: CallbackQuery, bot: Bot):
+    async with SessionLocal() as session:
+        user = await get_or_create_user(session, cb.from_user.id, cb.from_user.username)
+        await render_screen(
+            bot, session, user,
+            "📖 <b>Инструкции по подключению</b>\n\n"
+            "1️⃣ Оформите подписку и скопируйте ключ в разделе «Мои подписки» или в миниапе.\n"
+            "2️⃣ Скачайте клиент: <b>Happ</b>, <b>Streisand</b>, <b>Hiddify</b> (iOS/macOS/Windows/Android) или <b>v2rayNG</b> (Android).\n"
+            "3️⃣ Вставьте ключ из буфера обмена и включите соединение.",
+            back_kb("back_to_menu"),
+            cb=cb
+        )
     await cb.answer()
 
+# --- Не работает VPN? (полностью по скрину 2) ---
 @router.callback_query(F.data == "menu_troubleshoot")
-async def menu_troubleshoot(cb: CallbackQuery):
-    await cb.message.edit_text(
-        "🛠 <b>Не работает?</b>\n\n"
-        "• Проверьте системное время и отключите другие VPN/прокси.\n"
-        "• Обновите подписку в клиенте или переподключитесь к сети.\n"
-        "• Если проблема сохраняется — откройте миниап и напишите оператору в поддержку.",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🚀 Открыть миниап", web_app=WebAppInfo(url=WEBAPP_URL))],
-            [InlineKeyboardButton(text="← Назад", callback_data="back_to_menu")],
-        ]),
-        parse_mode="HTML"
+async def menu_troubleshoot(cb: CallbackQuery, bot: Bot):
+    text = (
+        "🛠 <b>Решение проблем с VPN</b>\n\n"
+        "1️⃣ <b>Обновите подписку</b> — в GenummVPN, Happ или Hiddify.\n"
+        "2️⃣ <b>Сбросьте клиент</b> — Настройки → Сброс → Полный сброс, затем добавьте подписку заново.\n"
+        "3️⃣ <b>Смените страну</b> — выберите другой сервер.\n"
+        "4️⃣ <b>Попробуйте другое приложение</b> — Happ, Streisand или Hiddify.\n"
+        "5️⃣ <b>Включите «Обходы»</b> — если VPN не работает через мобильный интернет.\n"
+        "6️⃣ <b>Android</b> — удалите другие VPN-профили в настройках телефона.\n"
+        "7️⃣ <b>Не добавляется подписка?</b> — Happ → Настройки → Подписки → User-Agent: xray.\n"
+        "8️⃣ <b>Выбирайте сервер с наименьшим пингом</b> — обычно он обеспечивает наиболее стабильное подключение.\n\n"
+        "❌ <b>Если не помогло — обратитесь в поддержку.</b>"
     )
+    async with SessionLocal() as session:
+        user = await get_or_create_user(session, cb.from_user.id, cb.from_user.username)
+        await render_screen(bot, session, user, text, troubleshoot_menu(), cb=cb)
     await cb.answer()
 
-# --- Оплата: всё в одном редактируемом сообщении без спама ---
+# --- Оплата: Stars, СБП, Крипта в одном окне ---
 @router.callback_query(F.data.startswith("pay_stars_"))
 async def pay_stars(cb: CallbackQuery, bot: Bot):
-    plan_id = cb.data.split("_")[2]
-    plan = PLANS.get(plan_id)
-    if not plan:
-        await cb.answer("Тариф не найден", show_alert=True)
+    item_id = cb.data.split("_")[2]
+    item = PLANS.get(item_id) or GB_PACKS.get(item_id)
+    if not item:
+        await cb.answer("Позиция не найдена", show_alert=True)
         return
 
+    desc = f"Подписка на {item['days']} дней" if "days" in item else f"Пакет трафика {item['name']}"
     invoice_link = await bot.create_invoice_link(
-        title=f"GenummVPN — {plan['name']}",
-        description=f"Подписка на {plan['days']} дней",
-        payload=f"stars_{plan_id}",
+        title=f"GenummVPN — {item['name']}",
+        description=desc,
+        payload=f"stars_{item_id}",
         provider_token="",
         currency="XTR",
-        prices=[LabeledPrice(label=plan["name"], amount=plan["price_stars"])],
+        prices=[LabeledPrice(label=item["name"], amount=item["price_stars"])],
     )
 
-    await cb.message.edit_text(
-        f"⭐ <b>Оплата Telegram Stars</b>\n"
-        f"Тариф: <b>{plan['name']}</b> · <b>{plan['price_rub']} ₽</b> ≈ <b>{plan['price_stars']} ⭐</b>",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text=f"Оплатить {plan['price_stars']} ⭐", url=invoice_link)],
-            [InlineKeyboardButton(text="← К способам оплаты", callback_data=f"select_plan_{plan_id}")]
-        ])
-    )
+    async with SessionLocal() as session:
+        user = await get_or_create_user(session, cb.from_user.id, cb.from_user.username)
+        back_target = f"select_plan_{item_id}" if item_id in PLANS else f"select_gb_{item_id}"
+        await render_screen(
+            bot, session, user,
+            f"⭐ <b>Оплата Telegram Stars</b>\n"
+            f"Позиция: <b>{item['name']}</b> · <b>{item['price_rub']} ₽</b> ≈ <b>{item['price_stars']} ⭐</b>",
+            InlineKeyboardMarkup(inline_keyboard=[
+                [styled_btn(f"Оплатить {item['price_stars']} ⭐", style="primary", url=invoice_link)],
+                [styled_btn("Назад", callback_data=back_target)],
+            ]),
+            cb=cb
+        )
     await cb.answer()
 
 @router.callback_query(F.data.startswith("pay_sbp_"))
-async def pay_sbp(cb: CallbackQuery):
-    plan_id = cb.data.split("_")[2]
-    plan = PLANS.get(plan_id)
-    if not plan:
+async def pay_sbp(cb: CallbackQuery, bot: Bot):
+    item_id = cb.data.split("_")[2]
+    item = PLANS.get(item_id) or GB_PACKS.get(item_id)
+    if not item:
         return
-    stub_url = f"https://yoomoney.ru/checkout/stub?plan={plan_id}&amount={plan['price_rub']}"
-    await cb.message.edit_text(
-        f"🏦 <b>Оплата через СБП</b>\n"
-        f"Тариф: <b>{plan['name']}</b> · <b>{plan['price_rub']} ₽</b>",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text=f"Оплатить {plan['price_rub']} ₽", url=stub_url)],
-            [InlineKeyboardButton(text="← К способам оплаты", callback_data=f"select_plan_{plan_id}")]
-        ])
-    )
+    stub_url = f"https://yoomoney.ru/checkout/stub?item={item_id}&amount={item['price_rub']}"
+    back_target = f"select_plan_{item_id}" if item_id in PLANS else f"select_gb_{item_id}"
+    async with SessionLocal() as session:
+        user = await get_or_create_user(session, cb.from_user.id, cb.from_user.username)
+        await render_screen(
+            bot, session, user,
+            f"🏦 <b>Оплата через СБП</b>\n"
+            f"Позиция: <b>{item['name']}</b> · <b>{item['price_rub']} ₽</b>",
+            InlineKeyboardMarkup(inline_keyboard=[
+                [styled_btn(f"Оплатить {item['price_rub']} ₽", style="success", url=stub_url)],
+                [styled_btn("Назад", callback_data=back_target)],
+            ]),
+            cb=cb
+        )
     await cb.answer()
 
 @router.callback_query(F.data.startswith("pay_crypto_"))
-async def pay_crypto(cb: CallbackQuery):
-    plan_id = cb.data.split("_")[2]
-    plan = PLANS.get(plan_id)
-    if not plan:
+async def pay_crypto(cb: CallbackQuery, bot: Bot):
+    item_id = cb.data.split("_")[2]
+    item = PLANS.get(item_id) or GB_PACKS.get(item_id)
+    if not item:
         return
-    stub_url = f"https://t.me/CryptoBot?start=stub_{plan_id}"
-    await cb.message.edit_text(
-        f"💎 <b>Оплата криптовалютой</b>\n"
-        f"Тариф: <b>{plan['name']}</b> · <b>{plan['price_rub']} ₽</b>",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Открыть CryptoBot", url=stub_url)],
-            [InlineKeyboardButton(text="← К способам оплаты", callback_data=f"select_plan_{plan_id}")]
-        ])
-    )
+    stub_url = f"https://t.me/CryptoBot?start=stub_{item_id}"
+    back_target = f"select_plan_{item_id}" if item_id in PLANS else f"select_gb_{item_id}"
+    async with SessionLocal() as session:
+        user = await get_or_create_user(session, cb.from_user.id, cb.from_user.username)
+        await render_screen(
+            bot, session, user,
+            f"💎 <b>Оплата криптовалютой</b>\n"
+            f"Позиция: <b>{item['name']}</b> · <b>{item['price_rub']} ₽</b>",
+            InlineKeyboardMarkup(inline_keyboard=[
+                [styled_btn("Открыть CryptoBot", style="primary", url=stub_url)],
+                [styled_btn("Назад", callback_data=back_target)],
+            ]),
+            cb=cb
+        )
     await cb.answer()
 
 # --- Успешная оплата Stars ---
@@ -471,32 +759,29 @@ async def on_stars_paid(message: Message, bot: Bot):
     payload = message.successful_payment.invoice_payload
     if not payload.startswith("stars_"):
         return
-    plan_id = payload.split("_")[1]
-    plan = PLANS.get(plan_id)
-    if not plan:
-        return
+    item_id = payload.split("_")[1]
     try:
         await message.delete()
     except Exception:
         pass
+
     async with SessionLocal() as session:
-        user = await extend_subscription(
-            session,
-            message.from_user.id,
-            plan["days"],
-            plan_id,
-            "stars",
-            plan["price_stars"],
-            status="paid"
-        )
-        await send_or_replace_bot_message(
-            bot, session, user,
-            text=(
-                f"✅ <b>Подписка активирована на {plan['days']} дней</b>\n\n"
-                f"Откройте миниап, чтобы скопировать ключ."
-            ),
-            reply_markup=main_menu()
-        )
+        if item_id in PLANS:
+            plan = PLANS[item_id]
+            user = await extend_subscription(
+                session, message.from_user.id, plan["days"], item_id, "stars", plan["price_stars"]
+            )
+            done_text = f"✅ <b>Подписка активирована на {plan['days']} дней</b>\n\nОткройте миниап или «Мои подписки», чтобы скопировать ключ."
+        elif item_id in GB_PACKS:
+            pack = GB_PACKS[item_id]
+            user = await add_extra_gb(
+                session, message.from_user.id, pack["gb"], item_id, "stars", pack["price_stars"]
+            )
+            done_text = f"✅ <b>Начислено {pack['name']}</b>\n\nВсего дополнительного трафика: <b>{user.extra_gb} ГБ</b>."
+        else:
+            return
+
+        await render_screen(bot, session, user, done_text, main_menu())
 
 # --- Ответ админа пользователю ---
 @router.message(F.reply_to_message)
@@ -541,7 +826,6 @@ async def main():
     dp = Dispatcher()
     dp.include_router(router)
 
-    # Кнопка запуска Mini App слева от строки ввода / меню бота
     try:
         await bot.set_chat_menu_button(
             menu_button=MenuButtonWebApp(text="Миниап", web_app=WebAppInfo(url=WEBAPP_URL))
