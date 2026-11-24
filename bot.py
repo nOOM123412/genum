@@ -12,7 +12,7 @@ from aiogram import Bot, Dispatcher, Router, F
 from aiogram.filters import Command, CommandStart
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton,
-    WebAppInfo, LabeledPrice, PreCheckoutQuery
+    WebAppInfo, LabeledPrice, PreCheckoutQuery, MenuButtonWebApp
 )
 from sqlalchemy import BigInteger, String, DateTime, Integer
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -123,12 +123,28 @@ def extract_tg_user(request: web.Request) -> dict | None:
 WELCOME_TEXT = (
     "<b>GenummVPN</b>\n"
     "<i>Speed up your freedom</i>\n\n"
-    "Откройте кабинет, чтобы управлять подпиской и ключом."
+    "Выберите действие:"
 )
 
 def main_menu():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🚀 Открыть GenummVPN", web_app=WebAppInfo(url=WEBAPP_URL))],
+        [InlineKeyboardButton(text="💳 Купить подписку", callback_data="menu_buy")],
+        [InlineKeyboardButton(text="📊 Продлить / Тарифы", callback_data="menu_buy")],
+        [InlineKeyboardButton(text="👤 Мой профиль", callback_data="menu_profile")],
+        [
+            InlineKeyboardButton(text="🔑 Мой ключ", callback_data="menu_key"),
+            InlineKeyboardButton(text="📖 Инструкции", callback_data="menu_guide"),
+        ],
+        [InlineKeyboardButton(text="🛠 Не работает?", callback_data="menu_troubleshoot")],
+        [InlineKeyboardButton(text="🚀 Открыть миниап", web_app=WebAppInfo(url=WEBAPP_URL))],
+    ])
+
+def plans_menu():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="1 месяц · 299 ₽", callback_data="select_plan_1m")],
+        [InlineKeyboardButton(text="3 месяца · 799 ₽ (−15%)", callback_data="select_plan_3m")],
+        [InlineKeyboardButton(text="1 год · 2 490 ₽ (−30%)", callback_data="select_plan_1y")],
+        [InlineKeyboardButton(text="← Назад", callback_data="back_to_menu")],
     ])
 
 def checkout_text(plan_id: str) -> str:
@@ -144,7 +160,12 @@ def pay_methods_kb(plan_id: str):
         [InlineKeyboardButton(text="⭐ Telegram Stars", callback_data=f"pay_stars_{plan_id}")],
         [InlineKeyboardButton(text="🏦 СБП (карта РФ)", callback_data=f"pay_sbp_{plan_id}")],
         [InlineKeyboardButton(text="💎 Криптовалюта", callback_data=f"pay_crypto_{plan_id}")],
-        [InlineKeyboardButton(text="← Назад", callback_data="back_to_app")]
+        [InlineKeyboardButton(text="← К тарифам", callback_data="menu_buy")],
+    ])
+
+def back_menu_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="← Назад", callback_data="back_to_menu")],
     ])
 
 async def send_or_replace_bot_message(bot: Bot, session: AsyncSession, user: User, text: str, reply_markup: InlineKeyboardMarkup):
@@ -280,6 +301,101 @@ async def cmd_start(message: Message, bot: Bot):
             reply_markup=main_menu()
         )
 
+# --- Навигация главного меню ---
+@router.callback_query(F.data == "back_to_menu")
+async def back_to_menu(cb: CallbackQuery):
+    await cb.message.edit_text(
+        WELCOME_TEXT,
+        reply_markup=main_menu(),
+        parse_mode="HTML"
+    )
+    await cb.answer()
+
+@router.callback_query(F.data == "menu_buy")
+async def menu_buy(cb: CallbackQuery):
+    await cb.message.edit_text(
+        "💎 <b>Выберите тариф GenummVPN</b>",
+        reply_markup=plans_menu(),
+        parse_mode="HTML"
+    )
+    await cb.answer()
+
+@router.callback_query(F.data.startswith("select_plan_"))
+async def select_plan(cb: CallbackQuery):
+    plan_id = cb.data.split("_")[2]
+    if plan_id not in PLANS:
+        await cb.answer("Тариф не найден", show_alert=True)
+        return
+    await cb.message.edit_text(
+        checkout_text(plan_id),
+        reply_markup=pay_methods_kb(plan_id),
+        parse_mode="HTML"
+    )
+    await cb.answer()
+
+@router.callback_query(F.data == "menu_profile")
+async def menu_profile(cb: CallbackQuery):
+    async with SessionLocal() as session:
+        user = await get_or_create_user(session, cb.from_user.id, cb.from_user.username)
+        now = datetime.utcnow()
+        is_active = bool(user.sub_end and user.sub_end > now)
+        sub_str = (
+            user.sub_end.strftime("%d.%m.%Y %H:%M UTC")
+            if is_active else "Нет активной подписки"
+        )
+        await cb.message.edit_text(
+            f"👤 <b>Мой профиль</b>\n\n"
+            f"ID: <code>{user.id}</code>\n"
+            f"Подписка до: <b>{sub_str}</b>",
+            reply_markup=back_menu_kb(),
+            parse_mode="HTML"
+        )
+    await cb.answer()
+
+@router.callback_query(F.data == "menu_key")
+async def menu_key(cb: CallbackQuery):
+    async with SessionLocal() as session:
+        user = await get_or_create_user(session, cb.from_user.id, cb.from_user.username)
+        now = datetime.utcnow()
+        is_active = bool(user.sub_end and user.sub_end > now and user.vpn_key)
+        if is_active:
+            body = f"<code>{user.vpn_key}</code>"
+        else:
+            body = "Ключ появится после оформления подписки."
+        await cb.message.edit_text(
+            f"🔑 <b>Ваш ключ доступа</b>\n\n{body}",
+            reply_markup=back_menu_kb(),
+            parse_mode="HTML"
+        )
+    await cb.answer()
+
+@router.callback_query(F.data == "menu_guide")
+async def menu_guide(cb: CallbackQuery):
+    await cb.message.edit_text(
+        "📖 <b>Инструкция по подключению</b>\n\n"
+        "1. Оформите подписку и скопируйте ключ в миниапе или разделе «Мой ключ».\n"
+        "2. Установите клиент: <b>Streisand</b> / <b>Hiddify</b> (iOS, macOS, Windows, Android) или <b>v2rayNG</b> (Android).\n"
+        "3. Вставьте ключ из буфера обмена и нажмите «Подключить».",
+        reply_markup=back_menu_kb(),
+        parse_mode="HTML"
+    )
+    await cb.answer()
+
+@router.callback_query(F.data == "menu_troubleshoot")
+async def menu_troubleshoot(cb: CallbackQuery):
+    await cb.message.edit_text(
+        "🛠 <b>Не работает?</b>\n\n"
+        "• Проверьте системное время и отключите другие VPN/прокси.\n"
+        "• Обновите подписку в клиенте или переподключитесь к сети.\n"
+        "• Если проблема сохраняется — откройте миниап и напишите оператору в поддержку.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🚀 Открыть миниап", web_app=WebAppInfo(url=WEBAPP_URL))],
+            [InlineKeyboardButton(text="← Назад", callback_data="back_to_menu")],
+        ]),
+        parse_mode="HTML"
+    )
+    await cb.answer()
+
 # --- Оплата: всё в одном редактируемом сообщении без спама ---
 @router.callback_query(F.data.startswith("pay_stars_"))
 async def pay_stars(cb: CallbackQuery, bot: Bot):
@@ -289,7 +405,6 @@ async def pay_stars(cb: CallbackQuery, bot: Bot):
         await cb.answer("Тариф не найден", show_alert=True)
         return
 
-    # Создаём нативную ссылку на оплату Stars и подставляем её в кнопку текущего сообщения
     invoice_link = await bot.create_invoice_link(
         title=f"GenummVPN — {plan['name']}",
         description=f"Подписка на {plan['days']} дней",
@@ -305,7 +420,7 @@ async def pay_stars(cb: CallbackQuery, bot: Bot):
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text=f"Оплатить {plan['price_stars']} ⭐", url=invoice_link)],
-            [InlineKeyboardButton(text="← К способам оплаты", callback_data=f"back_pay_{plan_id}")]
+            [InlineKeyboardButton(text="← К способам оплаты", callback_data=f"select_plan_{plan_id}")]
         ])
     )
     await cb.answer()
@@ -323,7 +438,7 @@ async def pay_sbp(cb: CallbackQuery):
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text=f"Оплатить {plan['price_rub']} ₽", url=stub_url)],
-            [InlineKeyboardButton(text="← К способам оплаты", callback_data=f"back_pay_{plan_id}")]
+            [InlineKeyboardButton(text="← К способам оплаты", callback_data=f"select_plan_{plan_id}")]
         ])
     )
     await cb.answer()
@@ -341,29 +456,8 @@ async def pay_crypto(cb: CallbackQuery):
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="Открыть CryptoBot", url=stub_url)],
-            [InlineKeyboardButton(text="← К способам оплаты", callback_data=f"back_pay_{plan_id}")]
+            [InlineKeyboardButton(text="← К способам оплаты", callback_data=f"select_plan_{plan_id}")]
         ])
-    )
-    await cb.answer()
-
-@router.callback_query(F.data.startswith("back_pay_"))
-async def back_pay(cb: CallbackQuery):
-    plan_id = cb.data.split("_")[2]
-    if plan_id not in PLANS:
-        return
-    await cb.message.edit_text(
-        checkout_text(plan_id),
-        reply_markup=pay_methods_kb(plan_id),
-        parse_mode="HTML"
-    )
-    await cb.answer()
-
-@router.callback_query(F.data == "back_to_app")
-async def back_to_app(cb: CallbackQuery):
-    await cb.message.edit_text(
-        WELCOME_TEXT,
-        reply_markup=main_menu(),
-        parse_mode="HTML"
     )
     await cb.answer()
 
@@ -399,7 +493,7 @@ async def on_stars_paid(message: Message, bot: Bot):
             bot, session, user,
             text=(
                 f"✅ <b>Подписка активирована на {plan['days']} дней</b>\n\n"
-                f"Откройте кабинет, чтобы скопировать ключ."
+                f"Откройте миниап, чтобы скопировать ключ."
             ),
             reply_markup=main_menu()
         )
@@ -446,6 +540,14 @@ async def main():
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher()
     dp.include_router(router)
+
+    # Кнопка запуска Mini App слева от строки ввода / меню бота
+    try:
+        await bot.set_chat_menu_button(
+            menu_button=MenuButtonWebApp(text="Миниап", web_app=WebAppInfo(url=WEBAPP_URL))
+        )
+    except Exception as e:
+        log.warning(f"Не удалось установить MenuButtonWebApp: {e}")
 
     app = create_web_app(bot)
     runner = web.AppRunner(app)
