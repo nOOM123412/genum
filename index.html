@@ -9,16 +9,12 @@
   :root {
     --bg: #040406;
     --surface: rgba(20, 20, 24, 0.72);
-    --surface-elevated: rgba(30, 30, 36, 0.85);
     --border: rgba(255, 255, 255, 0.08);
-    --border-highlight: rgba(255, 119, 0, 0.45);
     --accent: #FF6B00;
     --accent-light: #FF9A44;
-    --accent-glow: rgba(255, 107, 0, 0.28);
     --text-primary: #F8F8FA;
     --text-secondary: #8E8E98;
     --success: #30D158;
-    --danger: #FF453A;
     --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     --font-mono: ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
   }
@@ -40,7 +36,6 @@
     position: relative;
   }
 
-  /* Ambient luxury glow */
   body::before {
     content: "";
     position: fixed;
@@ -132,7 +127,7 @@
     50% { opacity: 0.45; transform: scale(0.85); }
   }
 
-  /* Luxury Glass Cards */
+  /* Glass Cards */
   .card {
     background: linear-gradient(165deg, rgba(28, 28, 34, 0.78) 0%, rgba(14, 14, 18, 0.88) 100%);
     border: 1px solid var(--border);
@@ -153,7 +148,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 18px;
+    margin-bottom: 16px;
   }
   .card-title {
     font-size: 11px;
@@ -171,9 +166,9 @@
     fill: var(--accent);
   }
 
-  /* Status Badge */
+  /* Status Badge (only shown when active) */
   .status-badge {
-    display: inline-flex;
+    display: none;
     align-items: center;
     gap: 7px;
     padding: 6px 12px;
@@ -181,24 +176,17 @@
     font-size: 12px;
     font-weight: 700;
     letter-spacing: 0.3px;
-  }
-  .status-badge.active {
     background: rgba(48, 209, 88, 0.14);
     color: var(--success);
     border: 1px solid rgba(48, 209, 88, 0.3);
     box-shadow: 0 0 20px rgba(48, 209, 88, 0.15);
   }
-  .status-badge.inactive {
-    background: rgba(255, 69, 58, 0.12);
-    color: var(--danger);
-    border: 1px solid rgba(255, 69, 58, 0.25);
+  .status-badge.active {
+    display: inline-flex;
   }
 
   .hero-main {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-end;
-    margin-top: 6px;
+    margin-top: 2px;
   }
   .hero-label {
     font-size: 12px;
@@ -210,15 +198,6 @@
     font-weight: 700;
     letter-spacing: -0.3px;
     color: var(--text-primary);
-  }
-  .protocol-tag {
-    font-family: var(--font-mono);
-    font-size: 11px;
-    color: var(--accent-light);
-    background: rgba(255, 107, 0, 0.12);
-    border: 1px solid rgba(255, 107, 0, 0.25);
-    padding: 5px 10px;
-    border-radius: 10px;
   }
 
   /* Key Box */
@@ -348,18 +327,12 @@
     text-align: right;
   }
   .plan-rub {
-    font-size: 19px;
+    font-size: 20px;
     font-weight: 800;
     color: var(--text-primary);
   }
   .plan-item.active .plan-rub {
     color: var(--accent-light);
-  }
-  .plan-stars {
-    font-size: 12px;
-    color: var(--text-secondary);
-    margin-top: 2px;
-    font-weight: 500;
   }
 
   /* Buttons */
@@ -601,14 +574,13 @@
           <svg viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
           Статус защиты
         </div>
-        <span id="statusBadge" class="status-badge inactive">Загрузка...</span>
+        <span id="statusBadge" class="status-badge">● Активна</span>
       </div>
       <div class="hero-main">
         <div>
           <div class="hero-label">Действует до</div>
           <div class="hero-date" id="subEnd">—</div>
         </div>
-        <div class="protocol-tag">REALITY TLS</div>
       </div>
     </div>
 
@@ -665,7 +637,6 @@
           </div>
           <div class="plan-right">
             <div class="plan-rub">299 ₽</div>
-            <div class="plan-stars">150 ⭐</div>
           </div>
         </div>
 
@@ -680,7 +651,6 @@
           </div>
           <div class="plan-right">
             <div class="plan-rub">799 ₽</div>
-            <div class="plan-stars">400 ⭐</div>
           </div>
         </div>
 
@@ -695,7 +665,6 @@
           </div>
           <div class="plan-right">
             <div class="plan-rub">2 490 ₽</div>
-            <div class="plan-stars">1 200 ⭐</div>
           </div>
         </div>
       </div>
@@ -772,7 +741,6 @@
     const initData = tg?.initData;
     const badge = document.getElementById('statusBadge');
     if (!initData) {
-      badge.textContent = 'Откройте в Telegram';
       document.getElementById('vpnKey').textContent = 'Доступно только внутри Telegram';
       return;
     }
@@ -784,8 +752,11 @@
       const data = await res.json();
       const isActive = !!data.sub_end && new Date(data.sub_end) > new Date();
 
-      badge.textContent = isActive ? '● Активна' : 'Не активна';
-      badge.className = `status-badge ${isActive ? 'active' : 'inactive'}`;
+      if (isActive) {
+        badge.classList.add('active');
+      } else {
+        badge.classList.remove('active');
+      }
 
       document.getElementById('subEnd').textContent = isActive
         ? new Date(data.sub_end).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })
@@ -793,7 +764,6 @@
 
       document.getElementById('vpnKey').textContent = data.vpn_key || 'Ключ появится сразу после оплаты';
     } catch (e) {
-      badge.textContent = 'Ошибка связи';
       document.getElementById('vpnKey').textContent = 'Не удалось загрузить данные';
     }
   }
